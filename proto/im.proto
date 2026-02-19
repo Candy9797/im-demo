@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+package im;
+
+// WebSocket 帧类型枚举（与 FrameType 对应）
+enum FrameTypeEnum {
+  FRAME_TYPE_UNKNOWN = 0;
+  AUTH = 1;
+  SEND_MESSAGE = 2;
+  TYPING = 3;
+  ACK = 4;
+  HEARTBEAT_PING = 5;
+  REQUEST_AGENT = 6;
+  SYNC = 7;
+  LOAD_HISTORY = 8;
+  MARK_READ = 9;
+  ADD_REACTION = 10;
+  REMOVE_REACTION = 11;
+  EDIT_MESSAGE = 12;
+  RECALL_MESSAGE = 13;
+  SIMULATE_PUSH = 14;
+  AUTH_OK = 15;
+  MESSAGE = 16;
+  MESSAGE_ACK = 17;
+  TYPING_START = 18;
+  TYPING_STOP = 19;
+  HEARTBEAT_PONG = 20;
+  QUEUE_STATUS = 21;
+  AGENT_INFO = 22;
+  PHASE_CHANGE = 23;
+  ERROR = 24;
+  SYNC_RESPONSE = 25;
+  SESSION_SWITCHED = 26;
+  HISTORY_RESPONSE = 27;
+  PRESENCE_UPDATE = 28;
+  READ_RECEIPT = 29;
+  REACTION_UPDATE = 30;
+  MESSAGE_EDIT = 31;
+  MESSAGE_RECALL = 32;
+  KICKED = 33;
+}
+
+// IM 消息（高流量类型，Protobuf 编码可显著减小体积）
+message IMMessage {
+  string id = 1;
+  string conversation_id = 2;
+  string content = 3;
+  string type = 4;
+  string status = 5;
+  string sender_type = 6;
+  string sender_id = 7;
+  string sender_name = 8;
+  optional string sender_avatar = 9;
+  int64 timestamp = 10;
+  optional bytes metadata = 11;  // JSON bytes for flexibility
+  optional int32 seq_id = 12;
+}
+
+// 消息列表（MESSAGE, AUTH_OK, SYNC_RESPONSE, HISTORY_RESPONSE 等）
+message MessageListPayload {
+  repeated IMMessage messages = 1;
+  optional bool has_more = 2;
+}
+
+// 单条消息 payload
+message SingleMessagePayload {
+  IMMessage message = 1;
+}
+
+// Message ACK 单项
+message MessageAckItem {
+  string client_msg_id = 1;
+  string server_msg_id = 2;
+  int32 seq_id = 3;
+}
+
+// Message ACK 列表
+message MessageAckPayload {
+  repeated MessageAckItem acks = 1;
+}
+
+// 心跳
+message HeartbeatPayload {
+  int64 ts = 1;
+}
+
+// 排队状态
+message QueueStatusPayload {
+  int32 position = 1;
+  int32 total = 2;
+  int32 estimated_wait = 3;
+}
+
+// WebSocket 帧：统一封装
+message Frame {
+  FrameTypeEnum type = 1;
+  int32 seq = 2;
+  int64 timestamp = 3;
+  bytes payload = 4;  // 根据 type 解码为对应类型，或 JSON
+}
