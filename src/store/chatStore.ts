@@ -802,6 +802,19 @@ export const useChatStore = create<ChatState>()(
         messages: s.messages,
         conversationId: s.conversationId,
       }),
+      // 离线切回在线时：先 SYNC 补全消息，后 rehydration 可能用 IndexedDB 旧快照覆盖，导致消息变少。
+      // merge 时对 messages 取「更完整」的一方（max seqId 更大），避免旧持久化覆盖新补全的列表。
+      merge: (state, persisted) => {
+        const cur = (state as ChatState).messages ?? [];
+        const per = (persisted as { messages?: Message[] })?.messages ?? [];
+        const curMax = cur.reduce((m, x) => Math.max(m, x.seqId ?? 0), 0);
+        const perMax = per.reduce((m, x) => Math.max(m, x.seqId ?? 0), 0);
+        return {
+          ...state,
+          ...persisted,
+          messages: curMax >= perMax ? cur : per,
+        };
+      },
     }
   )
 );

@@ -2735,6 +2735,12 @@ html, body {
   color: var(--danger);
 }
 
+.stress-result-muted {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-left: 4px;
+}
+
 .stress-result-hint {
   font-size: 12px;
   color: var(--text-tertiary);

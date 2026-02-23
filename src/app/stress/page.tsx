@@ -71,6 +71,8 @@ export default function StressPage() {
         if (intervalMs === 0) {
           await client.forceFlushOutgoing();
         }
+        // 留足时间让服务端 rate_limit 的 ERROR 帧返回后再统计，避免限流数漏计
+        const settleMs = 1500;
         setTimeout(() => {
           setStats({
             requested: count,
@@ -79,7 +81,7 @@ export default function StressPage() {
           setIsRunning(false);
           unsubRef.current?.();
           unsubRef.current = null;
-        }, 500);
+        }, settleMs);
         return;
       }
       sendMessage(`[压测] 第 ${i + 1}/${count} 条`);
@@ -224,6 +226,9 @@ export default function StressPage() {
                     {stats.rateLimited}
                   </strong>
                   <span>条</span>
+                  {stats.rateLimited === 0 && (
+                    <span className="stress-result-muted">（未触发）</span>
+                  )}
                 </div>
                 <div className="stress-result-hint">
                   服务端限制 {rateLimitConfig?.limitPerSec ?? '—'} 条/秒，{intervalMs}ms 间隔约
