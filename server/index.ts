@@ -9,7 +9,7 @@ import { renderToPipeableStream } from "react-dom/server";
 import { createStreamDocument } from "./stream-page";
 import cors from "cors";
 import path from "path";
-import { createServer } from "http";
+import { createServer, type IncomingMessage } from "http";
 import { WebSocketServer } from "ws";
 import { createNonce } from "./db";
 import { verifySiweAndIssueToken } from "./auth";
@@ -114,9 +114,21 @@ app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: "/ws" });
 
+/** 从 Sec-WebSocket-Protocol 头解析 JWT（子协议为 im-auth,<token>），避免 URL 泄露；无则回退到 URL query */
+function getTokenFromRequest(req: IncomingMessage): string | null {
+  const proto = req.headers["sec-websocket-protocol"];
+  if (proto) {
+    const protocols = proto.split(",").map((s) => s.trim());
+    if (protocols[0] === "im-auth" && protocols[1]) return protocols[1];
+    if (protocols[0] && protocols[0].startsWith("eyJ")) return protocols[0];
+  }
+  const url = new URL(req.url ?? "", `http://${req.headers.host}`);
+  return url.searchParams.get("token");
+}
+
 wss.on("connection", (ws, req) => {
   const url = new URL(req.url ?? "", `http://${req.headers.host}`);
-  const token = url.searchParams.get("token");
+  const token = getTokenFromRequest(req);
   const fresh = url.searchParams.get("fresh") === "1";
   const kickOthers = url.searchParams.get("multi") !== "1";
   const format = (url.searchParams.get("format") === "protobuf" ? "protobuf" : "json") as "json" | "protobuf";

@@ -91,12 +91,14 @@ export type SerializeFormat = "json" | "protobuf";
 
 /** WebSocket / HTTP 连接配置 */
 export interface ConnectionConfig {
-  url: string;                          // WebSocket URL（含 ?token=xxx）
+  url: string;                          // WebSocket URL（不含 token；token 经 Sec-WebSocket-Protocol 传递）
   token?: string;                       // JWT，用于认证
   userId: string;                       // 当前用户 ID
   reconnectAttempts?: number;           // 重连最大次数，默认 5
   reconnectInterval?: number;           // 重连间隔基数（毫秒），指数退避
   heartbeatInterval?: number;           // 心跳 Ping 间隔（毫秒），默认 30000
+  /** 心跳 Pong 超时（毫秒），超时未收到 Pong 则主动断开触发重连，默认 10000 */
+  heartbeatPongTimeoutMs?: number;
   messageQueueSize?: number;            // 待发消息队列最大长度
   apiBaseUrl?: string;                  // HTTP API 根地址（上传、搜索等）
   fresh?: boolean;                      // 是否新建会话（不恢复历史）

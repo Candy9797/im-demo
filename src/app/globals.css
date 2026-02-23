@@ -606,6 +606,7 @@ html, body {
   border-radius: var(--radius-xl);
 }
 
+/* 性能策略（见 docs/抖音商城风格电商页面方案.md 五）：动画 - transform 避免 layout */
 @keyframes slideUp {
   from {
     opacity: 0;
@@ -1259,6 +1260,14 @@ html, body {
 .msg-time {
   font-size: 10px;
   color: var(--text-tertiary);
+}
+
+/* 调试：每条消息的 id（虚拟列表 key）与 seqId（服务端单调递增序号） */
+.msg-debug-id {
+  font-size: 9px;
+  color: #fff;
+  opacity: 0.9;
+  word-break: break-all;
 }
 
 .msg-status {
@@ -3839,6 +3848,7 @@ html, body {
 .tb-page {
   min-height: 100vh;
   background: var(--tb-bg);
+  padding-bottom: max(24px, env(safe-area-inset-bottom, 24px));
 }
 
 /* 顶部栏 */
@@ -4106,6 +4116,30 @@ html, body {
   color: var(--tb-text-light);
 }
 
+/* 瀑布流面包屑：与 .tb-breadcrumb 一致，避免与 (itemCount) 重叠 */
+.wf-breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 0;
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 16px;
+}
+.wf-breadcrumb a {
+  color: #666;
+  text-decoration: none;
+}
+.wf-breadcrumb a:hover {
+  color: var(--tb-orange);
+}
+.wf-breadcrumb .tb-sep {
+  margin: 0 6px;
+}
+.wf-breadcrumb .tb-item-count {
+  margin-left: 6px;
+}
+
 /* 工具栏 */
 .tb-toolbar {
   display: flex;
@@ -4366,6 +4400,7 @@ html, body {
   max-width: 1200px;
   margin: 0 auto;
   padding: 16px;
+  padding-bottom: max(32px, env(safe-area-inset-bottom, 32px));
   display: flex;
   gap: 20px;
 }
@@ -4379,18 +4414,22 @@ html, body {
   min-width: 0;
 }
 
+/* 等宽高网格：每行固定列数，卡片统一尺寸 */
 .wf-container {
-  column-count: 4;
-  column-gap: 16px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
 }
 
 .wf-item {
-  break-inside: avoid;
-  margin-bottom: 16px;
+  min-height: 340px;
 }
 
 .wf-card {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
   text-decoration: none;
   color: inherit;
   background: white;
@@ -4405,16 +4444,27 @@ html, body {
 }
 
 .wf-card-link {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
   text-decoration: none;
   color: inherit;
 }
 
 .wf-card-actions {
+  flex: 0 0 auto;
   display: flex;
   gap: 8px;
   padding: 8px 12px;
   border-top: 1px solid #f0f0f0;
+  min-height: 40px;
+  align-items: center;
+}
+.wf-card-actions button {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .wf-btn-cart,
@@ -4447,6 +4497,8 @@ html, body {
 
 .wf-card-media {
   position: relative;
+  flex: 0 0 auto;
+  width: 100%;
   background: #f9f9f9;
   overflow: hidden;
 }
@@ -4494,7 +4546,14 @@ html, body {
 }
 
 .wf-card-body {
+  flex: 0 0 auto;
   padding: 12px;
+  min-height: 96px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 4px;
+  overflow: hidden;
 }
 
 .wf-card-title {
@@ -4514,6 +4573,7 @@ html, body {
   align-items: baseline;
   gap: 6px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .wf-card-price {
@@ -4531,6 +4591,11 @@ html, body {
 .wf-card-sgd {
   font-size: 11px;
   color: var(--tb-text-light);
+  flex-shrink: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wf-card-rating {
@@ -4636,7 +4701,7 @@ html, body {
 
 @media (max-width: 1024px) {
   .wf-container {
-    column-count: 3;
+    grid-template-columns: repeat(3, 1fr);
   }
 }
 
@@ -4645,16 +4710,13 @@ html, body {
     display: none;
   }
   .wf-container {
-    column-count: 2;
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
 @media (max-width: 480px) {
   .wf-container {
-    column-count: 2;
-    column-gap: 12px;
-  }
-  .wf-item {
-    margin-bottom: 12px;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
   }
 }

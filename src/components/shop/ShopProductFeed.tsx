@@ -1,13 +1,18 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useProductsQuery } from '@/hooks/useProducts';
+import { useProductsInfiniteQuery } from '@/hooks/useProducts';
+import { useTranslations } from '@/components/providers/IntlProvider';
 import { WaterfallCard } from './WaterfallCard';
 import { Pagination } from './Pagination';
 
+const PAGE_SIZE = 12;
+const MAX_ITEMS_PER_VIEW = 100;
+
 export function ShopProductFeed() {
+  const t = useTranslations('shop');
   const searchParams = useSearchParams();
   const q = searchParams.get('q') || '';
   const brand = searchParams.get('brand') || '';
@@ -30,9 +35,28 @@ export function ShopProductFeed() {
     page,
   };
 
-  const { data, status, error } = useProductsQuery(params);
-  const items = data?.items ?? [];
-  const total = data?.total ?? 0;
+  const { data, status, error, fetchNextPage, hasNextPage, isFetchingNextPage } = useProductsInfiniteQuery(params);
+  const items = data?.pages.flatMap((p) => p.items) ?? [];
+  const total = data?.pages[0]?.total ?? 0;
+
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  const loadMore = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage && items.length < MAX_ITEMS_PER_VIEW) fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage, items.length]);
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) loadMore();
+      },
+      { rootMargin: '200px', threshold: 0 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loadMore]);
 
   if (status === 'pending') {
     return <div className="wf-skeleton" />;
@@ -40,7 +64,7 @@ export function ShopProductFeed() {
   if (status === 'error') {
     return (
       <div className="wf-error" style={{ padding: '2rem', textAlign: 'center', color: 'var(--tb-text-light)' }}>
-        加载失败，请重试
+        {t('loadFail')}
       </div>
     );
   }
@@ -48,10 +72,10 @@ export function ShopProductFeed() {
   return (
     <>
       <div className="wf-breadcrumb">
-        <Link href="/">首页</Link>
+        <Link href="/">{t('breadcrumbHome')}</Link>
         <span className="tb-sep">&gt;</span>
-        <span>淘宝网官网</span>
-        <span className="tb-item-count">（共找到{total}件商品）</span>
+        <span>{t('breadcrumbShop')}</span>
+        <span className="tb-item-count">（{t('itemCount', { count: total })}）</span>
       </div>
 
       <div className="wf-container">
@@ -62,7 +86,19 @@ export function ShopProductFeed() {
         ))}
       </div>
 
-      <Pagination page={page} total={total} pageSize={12} />
+      <div ref={sentinelRef} className="wf-sentinel" aria-hidden />
+      {isFetchingNextPage && (
+        <div className="wf-load-more" style={{ padding: '1rem', textAlign: 'center', color: 'var(--tb-text-light)' }}>
+          {t('loading')}
+        </div>
+      )}
+      {!hasNextPage && items.length > 0 && (
+        <div className="wf-end" style={{ padding: '1rem', textAlign: 'center', color: 'var(--tb-text-light)', fontSize: '0.9rem' }}>
+          {items.length >= MAX_ITEMS_PER_VIEW ? t('loadedMax') : t('loadedAll')}
+        </div>
+      )}
+
+      <Pagination page={page} total={total} pageSize={PAGE_SIZE} />
     </>
   );
 }

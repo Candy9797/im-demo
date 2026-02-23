@@ -2,6 +2,9 @@
 
 /**
  * 历史页消息列表：独立于 chatStore，接收 messages 作为 prop，用于性能测试
+ *
+ * 性能策略（见 docs/抖音商城风格电商页面方案.md 五）：
+ * - 虚拟化：Virtuoso 仅渲染可见区，OVERSCAN 为缓冲区条数
  */
 
 import React, { useRef, useState, useCallback, useMemo } from 'react';
@@ -9,6 +12,7 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { MessageItem } from '@/components/MessageItem';
 import type { Message } from '@/sdk';
 
+/** 性能策略：虚拟化缓冲区 */
 const OVERSCAN = 8;
 
 interface HistoryMessageListProps {

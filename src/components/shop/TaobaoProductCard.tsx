@@ -4,6 +4,8 @@ import React, { useRef, useEffect, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import type { Product } from '@/lib/shop/mockProducts';
+import { useLocale } from '@/hooks/useLocale';
+import { shopPath } from '@/lib/i18n';
 
 interface TaobaoProductCardProps {
   product: Product;
@@ -51,8 +53,9 @@ function priceToSgd(yuan: number): string {
 }
 
 export function TaobaoProductCard({ product }: TaobaoProductCardProps) {
+  const locale = useLocale();
   return (
-    <Link href={`/shop/${product.id}`} className="tb-product-card">
+    <Link href={shopPath(`/${product.id}`, locale)} className="tb-product-card">
       <div className="tb-card-media">
         <LazyImage src={product.image} alt={product.title} />
         {product.label && (

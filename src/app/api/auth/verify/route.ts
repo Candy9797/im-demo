@@ -14,11 +14,22 @@ export async function POST(req: Request) {
 
   const { message, signature } = body;
   if (!message || !signature) {
-    return Response.json({ error: "Missing message or signature" }, { status: 400 });
+    return Response.json(
+      { error: "Missing message or signature" },
+      { status: 400 },
+    );
   }
 
+  // 合并「前端取消」与「8 秒超时」：任一触发都会中止对后端的 fetch
+  if (req.signal.aborted) {
+    return Response.json({ error: "Request aborted" }, { status: 499 });
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
+  req.signal.addEventListener("abort", () => {
+    clearTimeout(timeout);
+    controller.abort();
+  });
 
   try {
     const res = await fetch(`${BACKEND}/api/auth/verify`, {
@@ -43,7 +54,7 @@ export async function POST(req: Request) {
           ? "连接超时，请确认 IM 后端 (3001) 已启动"
           : "IM 后端未启动。请执行 npm run dev（同时启动前端 3000 + 后端 3001）",
       },
-      { status: 502 }
+      { status: 502 },
     );
   }
 }

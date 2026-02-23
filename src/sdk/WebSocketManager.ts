@@ -2,7 +2,7 @@
  * WebSocketManager - WebSocket 连接管理
  *
  * 职责：建立/关闭连接、收发帧、心跳保活、断线指数退避重连
- * 认证：token 通过 URL ?token=xxx 传递；支持 &fresh=1 新建会话
+ * 认证：JWT 通过 Sec-WebSocket-Protocol 头传递（子协议 ["im-auth", token]），避免 URL 泄露；支持 &fresh=1 新建会话
  */
 
 import { EventEmitter } from "./EventEmitter";
@@ -29,6 +29,7 @@ const DEFAULT_CONFIG: Partial<ConnectionConfig> = {
   reconnectAttempts: 5,     // 最大重连次数
   reconnectInterval: 1000,  // 重连间隔基数（指数退避）
   heartbeatInterval: 30000, // 每 30 秒发一次 Ping
+  heartbeatPongTimeoutMs: 10000, // Ping 后未在此时限内收到 Pong 则断开重连
 };
 
 /** 分片重组状态 */
@@ -52,8 +53,11 @@ export class WebSocketManager extends EventEmitter {
   private state: ConnectionState = ConnectionState.DISCONNECTED;
   private ws: WebSocket | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private pongTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectCount = 0;  // 当前重连次数
+  private visibilityBound = false; // 是否已绑定页面可见性（仅浏览器）
+  private onlineBound = false;    // 是否已绑定网络在线事件（仅浏览器）
   private seq = 0;             // 帧序列号（发帧时自增）
   private fragmentState: FragmentState | null = null;
 
@@ -63,19 +67,19 @@ export class WebSocketManager extends EventEmitter {
     this.format = this.config.format ?? "json";
   }
 
-  /** 构造 WebSocket URL，附带 token、fresh、format 参数 */
+  /** 构造 WebSocket URL，仅附带 fresh、format（不含 token，避免 URL 泄露） */
   private getWsUrl(): string {
     const base = this.config.url.replace(/\/$/, "");
-    const token = this.config.token;
     const fresh = (this.config as ConnectionConfig & { fresh?: boolean }).fresh;
     const params = new URLSearchParams();
-    if (token) params.set("token", token);
     if (fresh) params.set("fresh", "1");
+    const format = this.config.format;
+    if (format && format !== "json") params.set("format", format);
     const qs = params.toString();
     return qs ? `${base}?${qs}` : base;
   }
 
-  /** 建立 WebSocket 连接，已连接/连接中时直接返回 */
+  /** 建立 WebSocket 连接，已连接/连接中时直接返回；JWT 通过 Sec-WebSocket-Protocol 传递 */
   connect(): void {
     if (
       this.state === ConnectionState.CONNECTED ||
@@ -87,7 +91,10 @@ export class WebSocketManager extends EventEmitter {
     this.setState(ConnectionState.CONNECTING);
 
     try {
-      this.ws = new WebSocket(this.getWsUrl());
+      const url = this.getWsUrl();
+      const token = this.config.token;
+      const protocols = token ? ["im-auth", token] : undefined;
+      this.ws = new WebSocket(url, protocols);
       this.ws.binaryType = "arraybuffer";
 
       this.ws.onopen = () => {
@@ -95,6 +102,7 @@ export class WebSocketManager extends EventEmitter {
         this.reconnectCount = 0;
         this.emit(SDKEvent.CONNECTED);
         this.startHeartbeat();
+        this.bindPageLifecycle();
       };
 
       this.ws.onmessage = (event: MessageEvent) => {
@@ -141,7 +149,9 @@ export class WebSocketManager extends EventEmitter {
    */
   disconnect(): void {
     this.stopHeartbeat();
+    this.clearPongTimeout();
     this.clearReconnectTimer();
+    this.unbindPageLifecycle();
     this.fragmentState = null;
 
     if (this.ws) {
@@ -273,7 +283,7 @@ export class WebSocketManager extends EventEmitter {
         this.emit(SDKEvent.TYPING_STOP, frame.payload);
         break;
       case FrameType.HEARTBEAT_PONG:
-        // 心跳响应，无需处理
+        this.clearPongTimeout();
         break;
       case FrameType.QUEUE_STATUS:
         this.emit("queue_update", frame.payload);
@@ -320,9 +330,10 @@ export class WebSocketManager extends EventEmitter {
     }
   }
 
-  /** 连接断开时：停止心跳，未达上限则 scheduleReconnect，否则派发 DISCONNECTED */
+  /** 连接断开时：停止心跳、清除 Pong 超时，未达上限则 scheduleReconnect，否则派发 DISCONNECTED */
   private handleDisconnect(): void {
     this.stopHeartbeat();
+    this.clearPongTimeout();
     this.setState(ConnectionState.DISCONNECTED);
 
     if (this.reconnectCount < (this.config.reconnectAttempts || 5)) {
@@ -363,13 +374,19 @@ export class WebSocketManager extends EventEmitter {
     }
   }
 
-  /** 启动心跳：按 heartbeatInterval 定时发送 Ping */
+  /** 启动心跳：按 heartbeatInterval 定时发送 Ping，并设 Pong 超时以检测半开连接 */
   private startHeartbeat(): void {
+    const interval = this.config.heartbeatInterval || 30000;
     this.heartbeatTimer = setInterval(() => {
       if (this.state === ConnectionState.CONNECTED && this.ws) {
-        this.send(FrameType.HEARTBEAT_PING, { ts: Date.now() });
+        try {
+          this.send(FrameType.HEARTBEAT_PING, { ts: Date.now() });
+          this.schedulePongTimeout();
+        } catch {
+          // send 可能因连接已断抛错，忽略
+        }
       }
-    }, this.config.heartbeatInterval || 30000);
+    }, interval);
   }
 
   /** 停止心跳定时器 */
@@ -378,5 +395,73 @@ export class WebSocketManager extends EventEmitter {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
+    this.clearPongTimeout();
   }
+
+  /** Pong 超时：Ping 发出后未在限定时间内收到 Pong 则主动关闭连接，触发 onclose → 重连 */
+  private schedulePongTimeout(): void {
+    this.clearPongTimeout();
+    const ms = this.config.heartbeatPongTimeoutMs ?? 10000;
+    this.pongTimeoutTimer = setTimeout(() => {
+      this.pongTimeoutTimer = null;
+      if (this.state === ConnectionState.CONNECTED && this.ws) {
+        console.warn("[WebSocketManager] Heartbeat Pong timeout, closing connection");
+        this.ws.close();
+      }
+    }, ms);
+  }
+
+  private clearPongTimeout(): void {
+    if (this.pongTimeoutTimer) {
+      clearTimeout(this.pongTimeoutTimer);
+      this.pongTimeoutTimer = null;
+    }
+  }
+
+  /** 仅浏览器：绑定页面可见性、网络在线事件，用于切后台恢复与断网恢复 */
+  private bindPageLifecycle(): void {
+    if (typeof document === "undefined" || typeof window === "undefined") return;
+    if (this.visibilityBound && this.onlineBound) return;
+
+    if (!this.visibilityBound) {
+      this.visibilityBound = true;
+      document.addEventListener("visibilitychange", this._onVisibilityChange);
+    }
+    if (!this.onlineBound) {
+      this.onlineBound = true;
+      window.addEventListener("online", this._onNetworkOnline);
+    }
+  }
+
+  private unbindPageLifecycle(): void {
+    if (typeof document === "undefined" || typeof window === "undefined") return;
+    if (this.visibilityBound) {
+      document.removeEventListener("visibilitychange", this._onVisibilityChange);
+      this.visibilityBound = false;
+    }
+    if (this.onlineBound) {
+      window.removeEventListener("online", this._onNetworkOnline);
+      this.onlineBound = false;
+    }
+  }
+
+  /** 切回前台：立即发一次 Ping，用 Pong 超时检测连接是否仍有效 */
+  private _onVisibilityChange = (): void => {
+    if (typeof document === "undefined" || document.visibilityState !== "visible") return;
+    if (this.state !== ConnectionState.CONNECTED || !this.ws) return;
+    try {
+      this.send(FrameType.HEARTBEAT_PING, { ts: Date.now() });
+      this.schedulePongTimeout();
+    } catch {
+      // 已断则忽略，onclose 会触发重连
+    }
+  };
+
+  /** 网络恢复：立即重连，不等待退避间隔 */
+  private _onNetworkOnline = (): void => {
+    if (this.state !== ConnectionState.RECONNECTING && this.state !== ConnectionState.DISCONNECTED) return;
+    this.clearReconnectTimer();
+    this.reconnectCount = 0;
+    this.connect();
+  };
 }

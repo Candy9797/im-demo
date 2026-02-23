@@ -2,6 +2,9 @@
 
 /**
  * 消息列表：Virtuoso 虚拟化、顶部加载更多、新消息自动滚底、回到底部按钮
+ *
+ * 性能策略（见 docs/抖音商城风格电商页面方案.md 五）：
+ * - 虚拟化：Virtuoso 仅渲染可见区，OVERSCAN 为上下缓冲区条数
  */
 
 import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react';
@@ -12,7 +15,7 @@ import { MessageItem } from '@/components/MessageItem';
 import { TypingIndicator } from '@/components/TypingIndicator';
 import type { Message } from '@/sdk';
 
-/** 视口外多渲染条数，减少快速滚动时白屏 */
+/** 视口外多渲染条数，减少快速滚动时白屏（性能策略：虚拟化缓冲区） */
 const OVERSCAN = 5;
 
 /** 已读批量上报：收集间隔（ms） */

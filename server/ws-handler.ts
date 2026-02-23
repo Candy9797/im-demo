@@ -347,19 +347,19 @@ function handleFrame(ws: WebSocket, entry: ConnEntry, frame: Frame) {
 
     case FrameType.MARK_READ: {
       const { messageIds } = (frame.payload as { messageIds?: string[] }) ?? {};
-      if (!messageIds?.length) break;
+      if (!messageIds?.length || !convId) break;
       for (const msgId of messageIds) {
-        db.updateMessageStatus(msgId, "read");
-        const row = db.getMessage(msgId);
-        if (row) {
-          let meta: Record<string, unknown> = row.metadata
-            ? JSON.parse(row.metadata as string)
-            : {};
-          if (!Array.isArray(meta.readBy)) meta.readBy = [];
-          if (!(meta.readBy as string[]).includes(userId))
-            (meta.readBy as string[]).push(userId);
-          db.updateMessageMetadata(msgId, JSON.stringify(meta));
-        }
+        const row = db.getMessage(msgId, convId);
+        if (!row || row.conversation_id !== convId) continue;
+        const actualId = row.id;
+        db.updateMessageStatus(actualId, "read");
+        let meta: Record<string, unknown> = row.metadata
+          ? JSON.parse(row.metadata as string)
+          : {};
+        if (!Array.isArray(meta.readBy)) meta.readBy = [];
+        if (!(meta.readBy as string[]).includes(userId))
+          (meta.readBy as string[]).push(userId);
+        db.updateMessageMetadata(actualId, JSON.stringify(meta));
       }
       sendToUser(userId, FrameType.READ_RECEIPT, {
         messageIds,
@@ -412,9 +412,10 @@ function handleFrame(ws: WebSocket, entry: ConnEntry, frame: Frame) {
       if (!row || row.conversation_id !== convId || row.sender_id !== userId)
         break;
       if (row.msg_type !== MessageType.TEXT) break;
-      db.updateMessageContent(messageId, content.trim());
+      const actualId = row.id;
+      db.updateMessageContent(actualId, content.trim());
       sendToConversation(convId, FrameType.MESSAGE_EDIT, {
-        messageId,
+        messageId: row.client_msg_id || actualId,
         content: content.trim(),
       });
       break;
@@ -431,7 +432,7 @@ function handleFrame(ws: WebSocket, entry: ConnEntry, frame: Frame) {
         send(ws, FrameType.ERROR, {
           code: "recall_expired",
           message: "超过 2 分钟无法撤回",
-          messageId,
+          messageId: row.client_msg_id || messageId,
         });
         break;
       }
@@ -439,9 +440,12 @@ function handleFrame(ws: WebSocket, entry: ConnEntry, frame: Frame) {
         ? JSON.parse(row.metadata as string)
         : {};
       meta.recalled = true;
-      db.updateMessageContent(messageId, "已撤回");
-      db.updateMessageMetadata(messageId, JSON.stringify(meta));
-      sendToConversation(convId, FrameType.MESSAGE_RECALL, { messageId });
+      const actualId = row.id;
+      db.updateMessageContent(actualId, "已撤回");
+      db.updateMessageMetadata(actualId, JSON.stringify(meta));
+      sendToConversation(convId, FrameType.MESSAGE_RECALL, {
+        messageId: row.client_msg_id || actualId,
+      });
       break;
     }
 
@@ -583,7 +587,6 @@ function handleFrame(ws: WebSocket, entry: ConnEntry, frame: Frame) {
         "Yes, MetaMask is supported. Connect via Settings → Connect Wallet.",
         "KYC verification typically takes 24-48 hours.",
       ];
-      const toInsert: Parameters<typeof db.insertMessages>[0] = [];
       const batchMsgs: unknown[] = [];
       for (let i = 0; i < n; i++) {
         const seqId = db.nextSeqId(convId);
@@ -591,19 +594,20 @@ function handleFrame(ws: WebSocket, entry: ConnEntry, frame: Frame) {
         const msgId = `msg-sim-${ts}-${i}-${Math.random().toString(36).slice(2, 8)}`;
         const content = BOT_TEXTS[i % BOT_TEXTS.length];
         const botMsg = createBotMessage(msgId, convId, content);
-        toInsert.push({
-          msgId,
-          convId,
-          seqId,
-          content,
-          msgType: MessageType.TEXT,
-          senderType: SenderType.BOT,
-          senderId: "bot-1",
-          senderName: "Smart Assistant",
-        });
+        db.insertMessages([
+          {
+            msgId,
+            convId,
+            seqId,
+            content,
+            msgType: MessageType.TEXT,
+            senderType: SenderType.BOT,
+            senderId: "bot-1",
+            senderName: "Smart Assistant",
+          },
+        ]);
         batchMsgs.push({ ...botMsg, seqId });
       }
-      db.insertMessages(toInsert);
       sendToUser(userId, FrameType.MESSAGE, batchMsgs);
       console.log("[WS] simulate_push:", n, "条（批量下发）→", userId);
       break;

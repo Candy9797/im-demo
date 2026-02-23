@@ -43,11 +43,18 @@ export function useProductsQuery(params: ProductsQueryParams & { page?: number }
   });
 }
 
-export function useProductsInfiniteQuery(params: ProductsQueryParams) {
+const MAX_ITEMS_PER_VIEW = 100;
+
+export function useProductsInfiniteQuery(params: ProductsQueryParams & { page?: number }) {
+  const startPage = params.page ?? 1;
   return useInfiniteQuery({
     queryKey: ['products', 'infinite', params],
     queryFn: ({ pageParam }) => fetchProducts({ ...params, page: pageParam }),
-    initialPageParam: 1,
-    getNextPageParam: (last) => (last.hasMore ? last.page + 1 : undefined),
+    initialPageParam: startPage,
+    getNextPageParam: (last, allPages) => {
+      const loaded = allPages.reduce((sum, p) => sum + p.items.length, 0);
+      if (loaded >= MAX_ITEMS_PER_VIEW) return undefined;
+      return last.hasMore ? last.page + 1 : undefined;
+    },
   });
 }

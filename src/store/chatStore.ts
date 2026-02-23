@@ -345,12 +345,16 @@ export const useChatStore = create<ChatState>()(
           });
         });
 
-        // MESSAGE_STATUS_UPDATE：服务端 ACK 后更新消息状态（sent/delivered/read）
+        // MESSAGE_STATUS_UPDATE：服务端 ACK 后只更新 status、seqId（不改 id，避免列表 key 变化导致重排/闪烁）
         client.on(SDKEvent.MESSAGE_STATUS_UPDATE, (msg: unknown) => {
           const message = msg as Message;
           set((state) => {
             const m = state.messages.find((x) => x.id === message.id);
-            if (m) m.status = message.status;
+            if (m) {
+              m.status = message.status;
+              if (message.seqId != null) m.seqId = message.seqId;
+              if (message.metadata) m.metadata = { ...m.metadata, ...message.metadata };
+            }
           });
         });
         // MESSAGE_SEND_FAILED：消息发送失败（如网络错误、ACK 超时）
@@ -488,12 +492,11 @@ export const useChatStore = create<ChatState>()(
             // 同时支持 messageId 和 clientMsgId 匹配，能覆盖「已 ACK」和「未 ACK」两种情况。
             for (const m of state.messages) {
               const matches =
-                m.id === messageId || (clientMsgId && m.id === clientMsgId);
+                m.id === messageId ||
+                (clientMsgId && m.id === clientMsgId) ||
+                (messageId && (m.metadata as { serverMsgId?: string })?.serverMsgId === messageId);
               if (!matches) continue;
-              // 如果 payload 里有 messageId，说明服务端已经给这条消息分配了正式 id
-              // 本地之前可能还在用 clientMsgId，需要把 id 更新成服务端的 messageId
-              // 这样之后就可以用统一的 messageId 做后续操作，避免 id 不一致。
-              m.id = messageId ?? m.id;
+              // 不改 m.id，避免列表 key 变化导致重排
               const meta = (m.metadata as Record<string, unknown>) ?? {};
               // reactions 是服务端下发的最新反应快照，{ "👍": ["user-1", "user-2"], "❤️": ["user-3"] }
               // 避免本地再去合并、去重，减少状态不一致
@@ -505,7 +508,7 @@ export const useChatStore = create<ChatState>()(
             }
           });
         });
-        // MESSAGE_EDIT：编辑回执，同步多端或确认乐观更新
+        // MESSAGE_EDIT：编辑回执，同步多端或确认乐观更新（服务端可能回传 clientMsgId 或 serverMsgId，用 id 或 metadata.serverMsgId 匹配）
         client.on(SDKEvent.MESSAGE_EDIT, (payload: unknown) => {
           const { messageId, content } = payload as {
             messageId?: string;
@@ -513,7 +516,9 @@ export const useChatStore = create<ChatState>()(
           };
           if (!messageId || content == null) return;
           set((state) => {
-            const m = state.messages.find((x) => x.id === messageId);
+            const m = state.messages.find(
+              (x) => x.id === messageId || (x.metadata as { serverMsgId?: string })?.serverMsgId === messageId
+            );
             if (m) m.content = content;
           });
         });
@@ -523,7 +528,9 @@ export const useChatStore = create<ChatState>()(
           if (!messageId) return;
           if (_pendingRecallRevert?.messageId === messageId) _pendingRecallRevert = null;
           set((state) => {
-            const m = state.messages.find((x) => x.id === messageId);
+            const m = state.messages.find(
+              (x) => x.id === messageId || (x.metadata as { serverMsgId?: string })?.serverMsgId === messageId
+            );
             if (m) {
               m.content = "已撤回";
               m.type = MessageType.TEXT;

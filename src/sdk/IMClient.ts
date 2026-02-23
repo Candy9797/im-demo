@@ -434,14 +434,15 @@ MessageQueue 批量处理出队消息
       this.emit("server_error", payload),
     );
 
-    /** message_ack：服务端确认收到消息；支持单条或批量（payload 为对象或数组） */
+    /** message_ack：服务端确认收到消息；支持单条或批量（payload 为对象或数组），服务端会带 seqId */
     this.wsManager.on("message_ack", (payload: unknown) => {
       const items = Array.isArray(payload) ? payload : [payload];
       if (items.length > 1) this.emit("message_ack_batch", items.length);
       for (const p of items) {
-        const raw = (p as { clientMsgId?: string; client_msg_id?: string; serverMsgId?: string }) ?? {};
+        const raw = (p as { clientMsgId?: string; client_msg_id?: string; serverMsgId?: string; seqId?: number; seq_id?: number }) ?? {};
         const clientMsgId = raw.clientMsgId ?? raw.client_msg_id;
         const serverMsgId = raw.serverMsgId ?? (raw as { server_msg_id?: string }).server_msg_id;
+        const seqId = raw.seqId ?? raw.seq_id;
         if (!clientMsgId) {
           if (process.env.NODE_ENV === "development") console.warn("[IMClient] message_ack item missing clientMsgId", p);
           continue;
@@ -453,10 +454,17 @@ MessageQueue 批量处理出队消息
         );
         if (idx === -1) continue;
         const msg = this.conversation.messages[idx];
+        // 保持 id 为 clientMsgId，不换成 serverMsgId，避免列表 key 变化导致重渲染/错位。
+        // serverMsgId 存 metadata.serverMsgId：服务端落库用的主键，多端同步/回执里可能用 serverMsgId，
+        // 客户端用 id（clientMsgId）做 key、发 recall/edit/mark_read 时也发 clientMsgId，服务端 getMessage(msgId, convId) 会按 id 或 client_msg_id 解析。
         const updated: Message = {
           ...msg,
-          id: serverMsgId ?? msg.id,
           status: MessageStatus.SENT,
+          ...(seqId != null && { seqId }),
+          metadata: {
+            ...msg.metadata,
+            ...(serverMsgId && { serverMsgId }),
+          },
         };
         this.conversation.messages[idx] = updated;
         this.emit(SDKEvent.MESSAGE_STATUS_UPDATE, updated);

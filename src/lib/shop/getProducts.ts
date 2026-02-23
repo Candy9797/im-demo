@@ -9,6 +9,17 @@ import { MOCK_PRODUCTS } from './mockProducts';
 
 export type SortOption = 'default' | 'price_asc' | 'price_desc' | 'sales_desc' | 'rating_desc';
 
+/** 用于 shop2 客户端筛选/分页的状态（与 URL 解耦） */
+export interface Shop2FilterParams {
+  q?: string;
+  brand?: string;
+  category?: string;
+  sort?: SortOption | string;
+  priceMin?: number;
+  priceMax?: number;
+  page?: number;
+}
+
 export interface GetProductsParams {
   q?: string;
   brand?: string;

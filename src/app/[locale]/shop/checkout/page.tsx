@@ -5,9 +5,14 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { useCartStore } from '@/stores/cartStore';
+import { useLocale } from '@/hooks/useLocale';
+import { shopPath } from '@/lib/i18n';
+import { useTranslations } from '@/components/providers/IntlProvider';
 
 export default function CheckoutPage() {
+  const t = useTranslations('shop');
   const router = useRouter();
+  const locale = useLocale();
   const { items, totalAmount, clear } = useCartStore();
   const [submitting, setSubmitting] = useState(false);
   const [ordered, setOrdered] = useState(false);
@@ -15,8 +20,8 @@ export default function CheckoutPage() {
   if (items.length === 0 && !ordered) {
     return (
       <main className="tb-page" style={{ minHeight: '60vh', padding: '3rem', textAlign: 'center' }}>
-        <h1 style={{ marginBottom: '1rem' }}>购物车为空</h1>
-        <Link href="/shop" className="tb-btn">去选购</Link>
+        <h1 style={{ marginBottom: '1rem' }}>{t('cartEmpty')}</h1>
+        <Link href={shopPath('', locale)} className="tb-btn">{t('goBuy')}</Link>
       </main>
     );
   }
@@ -25,9 +30,9 @@ export default function CheckoutPage() {
     return (
       <main className="tb-page" style={{ minHeight: '60vh', padding: '3rem', textAlign: 'center' }}>
         <div style={{ fontSize: 48, marginBottom: '1rem' }}>✅</div>
-        <h1 style={{ marginBottom: '0.5rem' }}>下单成功</h1>
-        <p style={{ color: 'var(--tb-text-light)', marginBottom: '1.5rem' }}>感谢您的购买</p>
-        <Link href="/shop" className="tb-btn">继续购物</Link>
+        <h1 style={{ marginBottom: '0.5rem' }}>{t('orderSuccess')}</h1>
+        <p style={{ color: 'var(--tb-text-light)', marginBottom: '1.5rem' }}>{t('thanks')}</p>
+        <Link href={shopPath('', locale)} className="tb-btn">{t('continueShopping')}</Link>
       </main>
     );
   }
@@ -43,10 +48,10 @@ export default function CheckoutPage() {
 
   return (
     <main className="tb-page" style={{ minHeight: '60vh', padding: '2rem', maxWidth: 600, margin: '0 auto' }}>
-      <h1 style={{ marginBottom: '1.5rem', fontSize: '1.25rem' }}>确认订单</h1>
+      <h1 style={{ marginBottom: '1.5rem', fontSize: '1.25rem' }}>{t('confirmOrder')}</h1>
 
       <div style={{ background: 'white', borderRadius: 8, padding: 16, marginBottom: 16 }}>
-        <h3 style={{ marginBottom: 12, fontSize: 14 }}>商品清单</h3>
+        <h3 style={{ marginBottom: 12, fontSize: 14 }}>{t('orderList')}</h3>
         {items.map(({ product, quantity }) => (
           <div
             key={product.id}
@@ -81,18 +86,18 @@ export default function CheckoutPage() {
 
       <div style={{ background: 'white', borderRadius: 8, padding: 16, marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-          <span>商品总价</span>
+          <span>{t('goodsTotal')}</span>
           <span>¥{totalAmount().toFixed(2)}</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, fontSize: '1.1rem' }}>
-          <span>应付金额</span>
+          <span>{t('payTotal')}</span>
           <span style={{ color: '#e4393c' }}>¥{totalAmount().toFixed(2)}</span>
         </div>
       </div>
 
       <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-        <Link href="/shop/cart" className="tb-btn" style={{ background: 'white', color: 'var(--tb-orange)' }}>
-          返回修改
+        <Link href={shopPath('/cart', locale)} className="tb-btn" style={{ background: 'white', color: 'var(--tb-orange)' }}>
+          {t('backEdit')}
         </Link>
         <button
           type="button"
@@ -101,7 +106,7 @@ export default function CheckoutPage() {
           onClick={handleSubmit}
           disabled={submitting}
         >
-          {submitting ? '提交中...' : '提交订单'}
+          {submitting ? t('submitting') : t('submitOrder')}
         </button>
       </div>
     </main>

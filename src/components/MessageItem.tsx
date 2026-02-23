@@ -284,6 +284,9 @@ export const MessageItem = React.memo<MessageItemProps>(function MessageItem({
         </div>
         <div className="msg-meta">
           <span className="msg-time">{formatTime(message.timestamp)}</span>
+          <span className="msg-debug-id" title="列表 key 用 id；顺序用 seqId（单调递增）">
+            id: {message.id} · seqId: {message.seqId ?? '—'}
+          </span>
           {!hideReply && (  // 回复按钮
             <button
               className="msg-reply-btn"

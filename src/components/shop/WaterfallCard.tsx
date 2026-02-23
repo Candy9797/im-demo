@@ -6,6 +6,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { Product } from '@/lib/shop/mockProducts';
 import { useCartStore } from '@/stores/cartStore';
+import { useLocale } from '@/hooks/useLocale';
+import { shopPath } from '@/lib/i18n';
+import { useTranslations } from '@/components/providers/IntlProvider';
 
 interface WaterfallCardProps {
   product: Product;
@@ -22,7 +25,9 @@ function priceToSgd(yuan: number): string {
 
 /** 瀑布流商品卡片 - 支持加入购物车、立即购买 */
 export function WaterfallCard({ product }: WaterfallCardProps) {
+  const t = useTranslations('shop');
   const router = useRouter();
+  const locale = useLocale();
   const addItem = useCartStore((s) => s.addItem);
 
   const handleAddCart = (e: React.MouseEvent) => {
@@ -35,13 +40,14 @@ export function WaterfallCard({ product }: WaterfallCardProps) {
     e.preventDefault();
     e.stopPropagation();
     addItem(product);
-    router.push('/shop/checkout');
+    router.push(shopPath('/checkout', locale));
   };
 
   return (
     <div className="wf-card">
-      <Link href={`/shop/${product.id}`} className="wf-card-link">
+      <Link href={shopPath(`/${product.id}`, locale)} className="wf-card-link">
         <div className="wf-card-media">
+          {/* 性能策略（见 docs/抖音商城风格电商页面方案.md 五）：图片 - loading="lazy"、sizes 尺寸适配 */}
           <Image
             src={product.image}
             alt={product.title}
@@ -81,10 +87,10 @@ export function WaterfallCard({ product }: WaterfallCardProps) {
       </Link>
       <div className="wf-card-actions">
         <button type="button" className="wf-btn-cart" onClick={handleAddCart}>
-          加入购物车
+          {t('addCart')}
         </button>
         <button type="button" className="wf-btn-buy" onClick={handleBuyNow}>
-          立即购买
+          {t('buyNow')}
         </button>
       </div>
     </div>

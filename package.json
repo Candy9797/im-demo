@@ -8,7 +8,8 @@
     "dev:server": "tsx server/index.ts",
     "build": "next build",
     "start": "concurrently \"tsx server/index.ts\" \"next start\"",
-    "lint": "next lint"
+    "lint": "next lint",
+    "i18n:translate": "node scripts/translate-messages.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.21",

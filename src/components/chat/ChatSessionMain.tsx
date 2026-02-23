@@ -3,6 +3,9 @@
 /**
  * 聊天主区域：消息列表（Virtuoso）+ 输入框
  * 展示当前选中会话的消息，支持虚拟化渲染
+ *
+ * 性能策略（见 docs/抖音商城风格电商页面方案.md 五）：
+ * - 虚拟化：Virtuoso 仅渲染可见区，overscan 为缓冲区
  */
 import React, { useMemo } from 'react';
 import { Virtuoso } from 'react-virtuoso';

@@ -5,9 +5,14 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { useCartStore } from '@/stores/cartStore';
+import { useLocale } from '@/hooks/useLocale';
+import { shopPath } from '@/lib/i18n';
+import { useTranslations } from '@/components/providers/IntlProvider';
 
 export default function CartPage() {
+  const t = useTranslations('shop');
   const searchParams = useSearchParams();
+  const locale = useLocale();
   const checkoutMode = searchParams.get('checkout') === '1';
 
   const { items, removeItem, updateQuantity, totalCount, totalAmount } = useCartStore();
@@ -15,10 +20,10 @@ export default function CartPage() {
   if (items.length === 0 && !checkoutMode) {
     return (
       <main className="tb-page" style={{ minHeight: '60vh', padding: '3rem', textAlign: 'center' }}>
-        <h1 style={{ marginBottom: '1rem', fontSize: '1.5rem' }}>购物车为空</h1>
-        <p style={{ color: 'var(--tb-text-light)', marginBottom: '1.5rem' }}>快去挑选心仪商品吧</p>
-        <Link href="/shop" className="tb-btn">
-          去逛逛
+        <h1 style={{ marginBottom: '1rem', fontSize: '1.5rem' }}>{t('cartEmpty')}</h1>
+        <p style={{ color: 'var(--tb-text-light)', marginBottom: '1.5rem' }}>{t('goPick')}</p>
+        <Link href={shopPath('', locale)} className="tb-btn">
+          {t('goBrowse')}
         </Link>
       </main>
     );
@@ -27,7 +32,7 @@ export default function CartPage() {
   return (
     <main className="tb-page" style={{ minHeight: '60vh', padding: '2rem' }}>
       <h1 style={{ marginBottom: '1.5rem', fontSize: '1.25rem' }}>
-        {checkoutMode ? '确认订单' : '购物车'}
+        {checkoutMode ? t('confirmOrder') : t('cart')}
       </h1>
 
       <div className="tb-cart-list" style={{ background: 'white', borderRadius: 8, overflow: 'hidden', marginBottom: '1.5rem' }}>
@@ -43,7 +48,7 @@ export default function CartPage() {
               borderBottom: '1px solid #f0f0f0',
             }}
           >
-            <Link href={`/shop/${product.id}`} style={{ flexShrink: 0 }}>
+            <Link href={shopPath(`/${product.id}`, locale)} style={{ flexShrink: 0 }}>
               <div style={{ position: 'relative', width: 80, height: 80, borderRadius: 8, overflow: 'hidden' }}>
                 <Image
                   src={product.image}
@@ -55,7 +60,7 @@ export default function CartPage() {
               </div>
             </Link>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <Link href={`/shop/${product.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+              <Link href={shopPath(`/${product.id}`, locale)} style={{ textDecoration: 'none', color: 'inherit' }}>
                 <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {product.title}
                 </div>
@@ -87,7 +92,7 @@ export default function CartPage() {
               onClick={() => removeItem(product.id)}
               style={{ padding: '4px 12px', border: '1px solid #ddd', borderRadius: 4, cursor: 'pointer', background: 'white', color: '#999' }}
             >
-              删除
+              {t('delete')}
             </button>
           </div>
         ))}
@@ -95,19 +100,19 @@ export default function CartPage() {
 
       <div style={{ background: 'white', padding: 16, borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>
-          共 <strong>{totalCount()}</strong> 件商品，合计{' '}
+          {t('totalItems')}<strong>{totalCount()}</strong>{t('itemsUnit')}{' '}
           <strong style={{ color: '#e4393c', fontSize: '1.25rem' }}>¥{totalAmount().toFixed(2)}</strong>
         </span>
         <div style={{ display: 'flex', gap: 12 }}>
-          <Link href="/shop" className="tb-btn" style={{ background: 'white', color: 'var(--tb-orange)' }}>
-            继续购物
+          <Link href={shopPath('', locale)} className="tb-btn" style={{ background: 'white', color: 'var(--tb-orange)' }}>
+            {t('continueShopping')}
           </Link>
           <Link
-            href="/shop/checkout"
+            href={shopPath('/checkout', locale)}
             className="tb-btn"
             style={{ background: 'var(--tb-orange)', color: 'white', border: 'none' }}
           >
-            去结算
+            {t('checkout')}
           </Link>
         </div>
       </div>

@@ -1,38 +1,83 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { shopPath } from '@/lib/i18n';
+import { useTranslations } from '@/components/providers/IntlProvider';
+import type { Locale } from '@/lib/i18n';
+import type { Shop2FilterParams } from '@/lib/shop/getProducts';
 
 const BRANDS = [
-  { key: 'vivo', label: 'vivo' },
-  { key: '故宫', label: '故宫淘宝' },
+  { key: 'vivo', labelKey: 'brandVivo' as const },
+  { key: '故宫', labelKey: 'brandPalace' as const },
 ];
 
 const CATEGORIES = [
-  { key: '', label: '全部分类' },
-  { key: '数码', label: '数码' },
-  { key: '家居', label: '家居' },
-  { key: '女装', label: '女装' },
-  { key: '文创', label: '文创' },
-  { key: '美妆', label: '美妆' },
-  { key: '母婴', label: '母婴' },
-  { key: '运动', label: '运动' },
-  { key: '文具', label: '文具' },
+  { key: '', labelKey: 'allCategoriesFilter' as const },
+  { key: '数码', labelKey: 'digital' as const },
+  { key: '家居', labelKey: 'home' as const },
+  { key: '女装', labelKey: 'women' as const },
+  { key: '文创', labelKey: 'culture' as const },
+  { key: '美妆', labelKey: 'beauty' as const },
+  { key: '母婴', labelKey: 'baby' as const },
+  { key: '运动', labelKey: 'sports' as const },
+  { key: '文具', labelKey: 'stationery' as const },
 ];
 
 const SORT_OPTIONS = [
-  { key: 'default', label: '综合' },
-  { key: 'sales_desc', label: '销量' },
-  { key: 'price_asc', label: '价格升序' },
-  { key: 'price_desc', label: '价格降序' },
-  { key: 'rating_desc', label: '好评' },
+  { key: 'default', labelKey: 'sortDefault' as const },
+  { key: 'sales_desc', labelKey: 'sortSales' as const },
+  { key: 'price_asc', labelKey: 'sortPriceAsc' as const },
+  { key: 'price_desc', labelKey: 'sortPriceDesc' as const },
+  { key: 'rating_desc', labelKey: 'sortRating' as const },
 ];
 
-export function ShopFilters() {
+const RESET_UPDATES: Partial<Shop2FilterParams> = {
+  brand: undefined,
+  category: undefined,
+  sort: 'default',
+  priceMin: undefined,
+  priceMax: undefined,
+  page: 1,
+};
+
+interface ShopFiltersProps {
+  /** 当前 locale，在 [locale]/shop 下传入以生成带语言前缀的链接 */
+  locale?: Locale;
+  /** 筛选链接前缀，如 /shop2 则链接为 /shop2?category=xxx */
+  basePath?: string;
+  /** 纯客户端筛选：不跳转链接，通过 onParamsChange 更新父组件状态 */
+  clientSideFilter?: boolean;
+  /** 客户端模式下的当前筛选参数（由父组件传入） */
+  currentParams?: Shop2FilterParams;
+  /** 客户端模式下筛选变更回调 */
+  onParamsChange?: (updates: Partial<Shop2FilterParams>) => void;
+}
+
+export function ShopFilters({
+  locale,
+  basePath,
+  clientSideFilter,
+  currentParams,
+  onParamsChange,
+}: ShopFiltersProps) {
+  const t = useTranslations('shop');
   const searchParams = useSearchParams();
-  const [priceMin, setPriceMin] = useState(searchParams.get('priceMin') || '');
-  const [priceMax, setPriceMax] = useState(searchParams.get('priceMax') || '');
+  const [priceMin, setPriceMin] = useState(
+    () => (clientSideFilter && currentParams?.priceMin != null ? String(currentParams.priceMin) : searchParams.get('priceMin') || '')
+  );
+  const [priceMax, setPriceMax] = useState(
+    () => (clientSideFilter && currentParams?.priceMax != null ? String(currentParams.priceMax) : searchParams.get('priceMax') || '')
+  );
+  const base = basePath ?? (locale ? shopPath('', locale) : '/shop');
+
+  useEffect(() => {
+    if (clientSideFilter && currentParams) {
+      setPriceMin(currentParams.priceMin != null ? String(currentParams.priceMin) : '');
+      setPriceMax(currentParams.priceMax != null ? String(currentParams.priceMax) : '');
+    }
+  }, [clientSideFilter, currentParams?.priceMin, currentParams?.priceMax]);
 
   const buildUrl = (updates: Record<string, string | null>) => {
     const p = new URLSearchParams(searchParams.toString());
@@ -42,7 +87,7 @@ export function ShopFilters() {
     }
     p.delete('page');
     const s = p.toString();
-    return s ? `/shop?${s}` : '/shop';
+    return s ? `${base}?${s}` : base;
   };
 
   const buildPriceUrl = () => {
@@ -53,75 +98,137 @@ export function ShopFilters() {
     else p.delete('priceMax');
     p.delete('page');
     const s = p.toString();
-    return s ? `/shop?${s}` : '/shop';
+    return s ? `${base}?${s}` : base;
   };
 
-  const brand = searchParams.get('brand') || '';
-  const category = searchParams.get('category') || '';
-  const sort = searchParams.get('sort') || 'default';
+  const brand = clientSideFilter && currentParams ? (currentParams.brand ?? '') : (searchParams.get('brand') || '');
+  const category = clientSideFilter && currentParams ? (currentParams.category ?? '') : (searchParams.get('category') || '');
+  const sort = clientSideFilter && currentParams ? (currentParams.sort ?? 'default') : (searchParams.get('sort') || 'default');
+  const isClientMode = Boolean(clientSideFilter && onParamsChange);
+
+  const FilterLink = ({
+    href,
+    onClick: onClickProp,
+    active,
+    children,
+    className = 'tb-filter-link',
+  }: {
+    href: string;
+    onClick?: () => void;
+    active?: boolean;
+    children: React.ReactNode;
+    className?: string;
+  }) => {
+    if (isClientMode && onClickProp) {
+      return (
+        <button
+          type="button"
+          onClick={onClickProp}
+          className={`${className} ${active ? 'active' : ''}`}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', color: 'inherit', padding: 0, textAlign: 'left' }}
+        >
+          {children}
+        </button>
+      );
+    }
+    return (
+      <Link href={href} className={`${className} ${active ? 'active' : ''}`}>
+        {children}
+      </Link>
+    );
+  };
 
   return (
     <aside className="tb-sidebar wf-sidebar">
       <div className="tb-sidebar-section">
-        <h4 className="tb-sidebar-title">相关推荐</h4>
-        <Link href="/shop" className="tb-sidebar-link">
-          月销口碑推荐排行榜
-        </Link>
+        <h4 className="tb-sidebar-title">{t('recommendTitle')}</h4>
+        {isClientMode ? (
+          <button
+            type="button"
+            onClick={() => onParamsChange?.(RESET_UPDATES)}
+            className="tb-sidebar-link"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', color: 'inherit', padding: 0, textAlign: 'left' }}
+          >
+            {t('recommendRank')}
+          </button>
+        ) : (
+          <Link href={base} className="tb-sidebar-link">
+            {t('recommendRank')}
+          </Link>
+        )}
       </div>
 
       <div className="tb-sidebar-section">
-        <h4 className="tb-sidebar-title">分类</h4>
+        <h4 className="tb-sidebar-title">{t('categoryTitle')}</h4>
         {CATEGORIES.map((c) => (
-          <Link
+          <FilterLink
             key={c.key || 'all'}
             href={buildUrl({ category: c.key || null })}
-            className={`tb-filter-link ${category === c.key ? 'active' : ''}`}
+            onClick={isClientMode ? () => onParamsChange?.({ category: c.key || undefined, page: 1 }) : undefined}
+            active={category === c.key}
           >
-            {c.label}
-          </Link>
+            {t(c.labelKey)}
+          </FilterLink>
         ))}
       </div>
 
       <div className="tb-sidebar-section">
-        <h4 className="tb-sidebar-title">品牌</h4>
+        <h4 className="tb-sidebar-title">{t('brandTitle')}</h4>
         {BRANDS.map((b) => (
-          <Link
+          <FilterLink
             key={b.key}
             href={buildUrl({ brand: brand === b.key ? null : b.key })}
-            className={`tb-filter-link ${brand === b.key ? 'active' : ''}`}
+            onClick={isClientMode ? () => onParamsChange?.({ brand: brand === b.key ? undefined : b.key, page: 1 }) : undefined}
+            active={brand === b.key}
           >
-            {b.label}
-          </Link>
+            {t(b.labelKey)}
+          </FilterLink>
         ))}
       </div>
 
       <div className="tb-sidebar-section">
-        <h4 className="tb-sidebar-title">排序</h4>
+        <h4 className="tb-sidebar-title">{t('sortTitle')}</h4>
         {SORT_OPTIONS.map((s) => (
-          <Link
+          <FilterLink
             key={s.key}
             href={buildUrl({ sort: s.key === 'default' ? null : s.key })}
-            className={`tb-filter-link ${sort === s.key ? 'active' : ''}`}
+            onClick={isClientMode ? () => onParamsChange?.({ sort: s.key === 'default' ? undefined : s.key, page: 1 }) : undefined}
+            active={sort === s.key}
           >
-            {s.label}
-          </Link>
+            {t(s.labelKey)}
+          </FilterLink>
         ))}
       </div>
 
       <div className="tb-sidebar-section">
-        <h4 className="tb-sidebar-title">价格区间（元）</h4>
-        <form action={buildPriceUrl()} method="get" className="tb-price-form">
-          {Array.from(searchParams.entries())
-            .filter(([k]) => !['priceMin', 'priceMax', 'page'].includes(k))
-            .map(([k, v]) => (
-              <input key={k} type="hidden" name={k} value={v} />
-            ))}
+        <h4 className="tb-sidebar-title">{t('priceRange')}</h4>
+        <form
+          className="tb-price-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (isClientMode) {
+              onParamsChange?.({
+                priceMin: priceMin ? Number(priceMin) : undefined,
+                priceMax: priceMax ? Number(priceMax) : undefined,
+                page: 1,
+              });
+            }
+          }}
+          action={isClientMode ? undefined : buildPriceUrl()}
+          method={isClientMode ? undefined : 'get'}
+        >
+          {!isClientMode &&
+            Array.from(searchParams.entries())
+              .filter(([k]) => !['priceMin', 'priceMax', 'page'].includes(k))
+              .map(([k, v]) => (
+                <input key={k} type="hidden" name={k} value={v} />
+              ))}
           <div className="tb-price-inputs">
             <input
               type="number"
               name="priceMin"
               className="tb-price-input"
-              placeholder="最低"
+              placeholder={t('priceMinPlaceholder')}
               value={priceMin}
               onChange={(e) => setPriceMin(e.target.value)}
               min={0}
@@ -131,21 +238,32 @@ export function ShopFilters() {
               type="number"
               name="priceMax"
               className="tb-price-input"
-              placeholder="最高"
+              placeholder={t('priceMaxPlaceholder')}
               value={priceMax}
               onChange={(e) => setPriceMax(e.target.value)}
               min={0}
             />
           </div>
           <button type="submit" className="tb-btn tb-btn-sm">
-            确定
+            {t('confirmPrice')}
           </button>
         </form>
       </div>
 
-      <Link href="/shop" className="tb-btn tb-btn-reset">
-        重置
-      </Link>
+      {isClientMode ? (
+        <button
+          type="button"
+          onClick={() => onParamsChange?.(RESET_UPDATES)}
+          className="tb-btn tb-btn-reset"
+          style={{ cursor: 'pointer' }}
+        >
+          {t('reset')}
+        </button>
+      ) : (
+        <Link href={base} className="tb-btn tb-btn-reset">
+          {t('reset')}
+        </Link>
+      )}
     </aside>
   );
 }
