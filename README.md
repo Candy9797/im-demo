@@ -144,7 +144,7 @@ pnpm install
 pnpm run dev
 ```
 
-> **若打开聊天提示「IM 后端未启动」**：请执行 `pnpm run dev`（同时启动前端 3000 + 后端 3001），不要只跑 `next dev`。
+> **若打开聊天提示「IM 后端未启动」 **：请执行 `pnpm run dev`（同时启动前端 3000 + 后端 3001），不要只跑 `next dev`。
 
 If ports are in use:
 
