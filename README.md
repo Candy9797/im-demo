@@ -1,6 +1,6 @@
-# web3-im — IM & Multi-Scenario Demo
+# IM & Multi-Scenario Demo
 
-A **Web3-oriented IM demo** with customer support chat, friend/group chat (Mock), i18n shop, and AI/stream demos. Built with **Next.js App Router** and a **framework-agnostic IM SDK** (WebSocket, heartbeat, reconnection, batching, Protobuf). Project name: `web3-im`.
+An **IM demo** with customer support chat, friend/group chat (Mock), i18n shop, and AI/stream demos. Built with **Next.js App Router** and a **framework-agnostic IM SDK** (WebSocket, heartbeat, reconnection, batching, Protobuf).
 
 ---
 
