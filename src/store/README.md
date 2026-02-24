@@ -96,7 +96,7 @@
 
 ### 3.5 持久化（Persist）
 
-- **存储**：`chatPersistStorage`（IndexedDB，库名 `web3-im-chat`），接口见 `src/lib/chatPersistStorage.ts`。
+- **存储**：`chatPersistStorage`（IndexedDB，库名 `im-demo-chat`），接口见 `src/lib/chatPersistStorage.ts`。
 - **partialize**：只持久化 `messages`、`conversationId`。不持久化 `client`（不可序列化）、`auth`（敏感/过期）、连接/会话/UI 等运行时状态。
 - **merge**：rehydration 时与当前内存 state 合并；对 `messages` 取「更完整」的一方（按 max seqId），避免离线期间 SYNC 补全后的新列表被旧 IndexedDB 快照覆盖。
 - **防抖**：`chatPersistStorage.setItem` 内 80ms 防抖，减少频繁写入 IndexedDB。

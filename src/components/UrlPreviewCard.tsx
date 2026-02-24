@@ -50,7 +50,7 @@ const KNOWN_PREVIEWS: Record<string, UrlPreviewMeta> = {
   'https://viem.sh': {
     url: 'https://viem.sh',
     title: 'viem',
-    description: 'TypeScript Interface for Ethereum. A fast, type-safe alternative to ethers.js and web3.js.',
+    description: 'TypeScript Interface for Ethereum. A fast, type-safe alternative to ethers.js.',
   },
 };
 

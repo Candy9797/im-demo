@@ -5,7 +5,7 @@ import jwt from "jsonwebtoken";
 import { SiweMessage } from "siwe";
 import { consumeNonce, ensureUser } from "./db";
 
-const JWT_SECRET = process.env.JWT_SECRET || "web3-im-dev-secret-change-in-production";
+const JWT_SECRET = process.env.JWT_SECRET || "im-demo-dev-secret-change-in-production";
 const JWT_EXPIRES = "24h";
 
 export async function verifySiweAndIssueToken(

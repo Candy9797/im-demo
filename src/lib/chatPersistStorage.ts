@@ -40,12 +40,12 @@ Rehydration 是异步的，所以在 connect() 刚完成时，可能还没完成
 “Rehydration” = 再次加水，让脱水的东西恢复原状
 在状态持久化场景里，指的是把“存起来的数据”还原成“可用的状态”。
  */
-const DB_NAME = "web3-im-chat";
+const DB_NAME = "im-demo-chat";
 const DB_VERSION = 1;
 const STORE_NAME = "state";
 
 /** 与 chatStore persist 的 name 一致，用于 getItem/setItem 的 key */
-export const CHAT_PERSIST_NAME = "web3-im-chat";
+export const CHAT_PERSIST_NAME = "im-demo-chat";
 
 const DEBOUNCE_MS = 80;
 

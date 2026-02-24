@@ -42,7 +42,7 @@ export const MOCK_FRIENDS: Friend[] = [
 ];
 
 export const MOCK_GROUPS: Group[] = [
-  { id: 'group-1', name: 'Web3 技术交流', memberCount: 12, unreadCount: 3, lastMessagePreview: 'Alice: 有人了解 Layer2 吗？', lastMessageTime: Date.now() - 120000, typingUserIds: ['user-alice'] },
+  { id: 'group-1', name: '技术交流', memberCount: 12, unreadCount: 3, lastMessagePreview: 'Alice: 有人了解 Layer2 吗？', lastMessageTime: Date.now() - 120000, typingUserIds: ['user-alice'] },
   { id: 'group-2', name: '项目协作', memberCount: 5, unreadCount: 0, lastMessagePreview: 'Bob: 任务已完成', lastMessageTime: Date.now() - 3600000, typingUserIds: [] },
   { id: 'group-3', name: '日常闲聊', memberCount: 28, unreadCount: 15, lastMessagePreview: 'Carol: 哈哈哈', lastMessageTime: Date.now() - 30000, typingUserIds: ['user-carol', 'user-eve'] },
 ];
@@ -52,7 +52,7 @@ const C2C_LINES = [
   ['你好！有什么可以帮你的？', 'me'],
   ['想请教一些技术问题', 'friend'],
   ['好的，请说', 'me'],
-  ['关于 Web3 钱包集成，有什么推荐方案？', 'friend'],
+  ['关于钱包集成，有什么推荐方案？', 'friend'],
   ['可以试试 ethers.js 或 wagmi，文档比较全', 'me'],
   ['wagmi 和 viem 哪个更好？', 'friend'],
   ['viem 更轻量，wagmi 封装了 React hooks，看项目需求', 'me'],

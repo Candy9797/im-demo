@@ -836,6 +836,6 @@ export const useChatStore = create<ChatState>()(
 //                               │
 //                               ▼
 // ┌─────────────────────────────────────────────────────────────┐
-// │  chatPersistStorage.setItem("web3-im-chat", jsonStr)         │
+// │  chatPersistStorage.setItem("im-demo-chat", jsonStr)         │
 // │  → 写入 IndexedDB（带防抖）                                    │
 // └─────────────────────────────────────────────────────────────┘

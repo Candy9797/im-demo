@@ -64,13 +64,13 @@ Zustand persist 的 IndexedDB 存储引擎，用于将 chatStore 部分状态持
 | **chatPersistStorage** | 实现 StateStorage：`getItem(name)`、`setItem(name, value)`、`removeItem(name)`。setItem 带 80ms 防抖。 |
 | **getPersistedChatState()** | 从 IndexedDB 读取并解析 chat 持久化状态。若有 pending 未写入会先 flush，保证读到最新。返回 `{ messages, conversationId }` 或 null。 |
 | **PersistedChatState** | 类型：`{ messages: Array<...>, conversationId: string }`，与 partialize 一致。 |
-| **CHAT_PERSIST_NAME** | 持久化 key，与 chatStore persist 的 name 一致（`"web3-im-chat"`）。 |
+| **CHAT_PERSIST_NAME** | 持久化 key，与 chatStore persist 的 name 一致（`"im-demo-chat"`）。 |
 
 ---
 
 ## 实现要点
 
-- **openDB()**：打开 IndexedDB，`onupgradeneeded` 时创建 objectStore（keyPath: `"key"`），库名 `web3-im-chat`，版本 1。
+- **openDB()**：打开 IndexedDB，`onupgradeneeded` 时创建 objectStore（keyPath: `"key"`），库名 `im-demo-chat`，版本 1。
 - **防抖**：模块级 `pendingKey` / `pendingValue` / `flushTimer`；`setItem` 只更新 pending 并设 80ms 定时器，定时器触发或 `getPersistedChatState` 主动 flush 时调用 **flushWrite()** 真正写入。
 - **flushWrite()**：清 timer、取 pending、清空 pending，用 transaction 把 `{ key, value }` 写入 STORE_NAME，完成后 close db。
 - **removeItem**：取消未执行的 flush 定时器、清空 pending，再在 DB 里 delete(name)，用于 destroy 等场景。
