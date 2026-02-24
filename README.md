@@ -1,274 +1,222 @@
-# IM Demo - Customer Support Chat System
+# web3-im — IM & Multi-Scenario Demo
 
-A production-grade **Instant Messaging (IM)** demo for a Web3 exchange, inspired by Binance's customer support system. Built from scratch (0→1) with **Next.js App Router** to demonstrate deep IM architecture knowledge, React/Next.js proficiency, and high-QPS handling patterns.
+A **Web3-oriented IM demo** with customer support chat, friend/group chat (Mock), i18n shop, and AI/stream demos. Built with **Next.js App Router** and a **framework-agnostic IM SDK** (WebSocket, heartbeat, reconnection, batching, Protobuf). Project name: `web3-im`.
 
-## Demo Features
+---
 
-### 1. Smart Assistant Phase (Bot)
-- Self-service FAQ navigation with categorized quick-action buttons
-- Auto-response engine with keyword matching
-- Seamless handoff to human agents
+## Project Features
 
-### 2. Human Agent Phase
-- Queue system with real-time position tracking
-- Agent assignment with ID/name display (e.g., "Customer Service #1024")
-- Slack-like minimalist chat interface
+### 1. Customer Support IM (Bot → Agent)
 
-### 3. Rich Media Support
-- Text messages with emoji picker
-- Image upload with thumbnail preview & lightbox
-- PDF document sharing with file metadata display
-- Message delivery status indicators (sending → sent → delivered → read)
+- **Bot phase**: FAQ navigation, keyword auto-reply, handoff to human
+- **Queuing**: Real-time queue position and estimated wait
+- **Agent phase**: Assigned agent info, full chat (text / emoji / file), typing indicators, read receipts
+- **Rich media**: Text, emoji picker, image upload (thumbnail + lightbox), PDF, stickers
+- **Status**: Sending → sent → delivered → read; edit & recall with optimistic updates
+- **Connection**: Connected / reconnecting / disconnected; heartbeat + Pong timeout; visibility & network recovery
 
-### 4. Real-time Communication
-- Typing indicators (bot & agent)
-- Connection state management (connected/reconnecting/disconnected)
-- Optimistic UI updates
+### 2. Friend / Group Chat (Mock)
+
+- **Route**: `/chat` — sidebar (friends & groups), multi-conversation switch
+- **Messages**: Per-conversation buckets, virtualized list (`react-virtuoso`)
+- **Local-only**: Mock data, no backend; reference reply, reactions, edit, recall
+
+### 3. i18n Shop
+
+- **Routes**: `/shop` → redirects to `/zh/shop` or `/en/shop` (cookie / Accept-Language)
+- **Pages**: Product list, filters, search; product detail `/[locale]/shop/[id]`; cart; checkout
+- **i18n**: `[locale]` segment, `messages/zh.json` & `en.json`, `IntlProvider`, middleware locale detection
+- **Shop2**: `/shop2` — waterfall feed, SSR data from `getProducts`
+
+### 4. Other Demos
+
+- **AI chat**: `/ai` — stream-style UI, markdown/code blocks
+- **Stream**: `/stream` — streaming demo
+- **History**: `/history` — message history (Mock)
+- **test-ws**: `/test-ws` — WebSocket debug (real WS, no Mock)
+- **demo-protobuf**: Protobuf frame encode/decode demo
+- **stress**: High-QPS / stress test page
+- **demo/server-actions**: Next.js Server Actions demo
 
 ---
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────┐
-│              Next.js App Router (SSR/SSG)              │
-│  ┌──────────────────────────────────────────────────┐ │
-│  │ layout.tsx (Server) → metadata, global styles     │ │
-│  │ page.tsx (Server)   → static shell, SEO           │ │
-│  └───────────────┬──────────────────────────────────┘ │
-│                  │ Client Boundary ('use client')      │
-│  ┌───────────────▼──────────────────────────────────┐ │
-│  │           UI Layer (React Client Components)      │ │
-│  │  ┌──────────┐ ┌───────────┐ ┌────────────────┐  │ │
-│  │  │ChatWindow│ │MessageList│ │ InputArea       │  │ │
-│  │  └────┬─────┘ └─────┬─────┘ └──────┬─────────┘  │ │
-│  │       └─────────────┼──────────────┘             │ │
-│  │                     ▼                             │ │
-│  │           ┌─────────────────┐                     │ │
-│  │           │  Zustand Store  │ (State Bridge)      │ │
-│  │           └────────┬────────┘                     │ │
-│  └────────────────────┼─────────────────────────────┘ │
-└───────────────────────┼───────────────────────────────┘
-                        ▼
-┌──────────────────────────────────────────────────────┐
-│               SDK Layer (Framework-agnostic)           │
-│  ┌────────────────────────────────────────────────┐  │
-│  │              IMClient                          │  │
-│  │  - Public API (sendMessage, connect)           │  │
-│  │  - Event emission (pub/sub)                    │  │
-│  │  - Conversation state machine                  │  │
-│  └────┬──────────────────────┬────────────────────┘  │
-│       ▼                      ▼                       │
-│  ┌──────────────┐  ┌─────────────────────┐          │
-│  │ WebSocket    │  │   MessageQueue      │          │
-│  │ Manager      │  │                     │          │
-│  │ - Reconnect  │  │ - Batch processing  │          │
-│  │ - Heartbeat  │  │ - Deduplication     │          │
-│  │ - Frames     │  │ - Retry w/ backoff  │          │
-│  │ - Exp backoff│  │ - Throttling        │          │
-│  └──────────────┘  └─────────────────────┘          │
-│       ▼                                              │
-│  ┌──────────────┐                                    │
-│  │ EventEmitter │ (Cross-cutting concern)            │
-│  └──────────────┘                                    │
-└──────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                  Next.js App Router                          │
+│  layout.tsx (Server) → metadata, globals.css, QueryProvider   │
+│  [locale]/layout.tsx → IntlProvider (shop i18n)               │
+└───────────────────────────┬─────────────────────────────────┘
+                            │ Client boundary ('use client')
+┌───────────────────────────▼─────────────────────────────────┐
+│                    UI Layer (React)                           │
+│  ChatWidget/ChatWindow │ ChatSession* │ Shop* │ LandingHero   │
+│            │                    │              │              │
+│            ▼                    ▼              ▼              │
+│  ┌──────────────┐    ┌──────────────────┐  ┌─────────────┐  │
+│  │  chatStore   │    │ chatSessionStore │  │  cartStore   │  │
+│  │ (IM + persist)│   │ (friend/group)   │  │  (shop)      │  │
+│  └──────┬───────┘    └──────────────────┘  └─────────────┘  │
+└─────────┼────────────────────────────────────────────────────┘
+          │
+┌─────────▼────────────────────────────────────────────────────┐
+│                  SDK (framework-agnostic)                    │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │ TIM (optional) — unified API layer                      │ │
+│  │ IMClient — session, sendMessage, loadHistory, events     │ │
+│  └────┬──────────────────────────────────┬─────────────────┘ │
+│       ▼                                   ▼                   │
+│  ┌──────────────┐              ┌─────────────────────┐       │
+│  │ WebSocket     │              │   MessageQueue      │       │
+│  │ Manager       │              │   batching, dedup,  │       │
+│  │ heartbeat,    │              │   retry, pause      │       │
+│  │ reconnect,    │              └─────────────────────┘       │
+│  │ Pong timeout  │                                              │
+│  └──────┬────────┘              serializer (JSON/Protobuf)     │
+│         ▼                                                      │
+│  EventEmitter (pub/sub)                                        │
+└───────────────────────────────────────────────────────────────┘
 ```
 
-## Next.js Architecture Decisions
-
-### Server vs Client Component Split
-
-| Layer | Rendering | Why |
-|-------|-----------|-----|
-| `layout.tsx` | Server | Static shell, metadata, global CSS — no JS shipped |
-| `page.tsx` | Server | Static landing content, SEO-friendly |
-| `LandingHero` | Client | Needs `useChatStore` for opening chat |
-| `ChatWidget` | Client | Entire IM system is interactive — client boundary |
-| SDK Layer | N/A | Pure TypeScript, no React dependency |
-
-### Why Next.js?
-
-1. **SSR/SSG** for the landing page → fast initial load, better SEO
-2. **App Router** separates server and client concerns clearly
-3. **Path aliases** (`@/`) for clean imports
-4. **Built-in optimization** — automatic code splitting, image optimization
-5. **API Routes** ready for future server-side chat endpoints (e.g., message history, auth)
-6. **Production-ready** — built-in caching, compression, static export
+- **Store**: `chatStore` (customer IM, IndexedDB persist), `chatSessionStore` (friend/group Mock), `cartStore` (shop). See `src/store/README.md`.
+- **SDK**: `IMClient` holds `WebSocketManager` + `MessageQueue`; events drive store updates.
 
 ---
 
-## Key Design Decisions
+## Main Routes
 
-### 1. SDK Architecture (Bottom-up)
-
-The SDK is framework-agnostic and could be published as `@company/im-sdk`:
-
-- **EventEmitter**: Typed pub/sub system. Decouples SDK internals from the UI framework. Supports `on`, `once`, `off`, and auto-cleanup via returned unsubscribe functions.
-
-- **WebSocketManager**: Manages the full WebSocket lifecycle:
-  - Connection state machine: `DISCONNECTED → CONNECTING → CONNECTED → RECONNECTING`
-  - Exponential backoff with jitter for reconnection
-  - Heartbeat ping/pong for connection health monitoring
-  - Frame-level protocol with sequence numbers for ordering
-
-- **MessageQueue**: Critical for high-QPS scenarios:
-  - **Batching**: Groups messages into configurable batch sizes (default 20) with flush intervals (100ms) to reduce render cycles
-  - **Deduplication**: Tracks seen message IDs within a time window to prevent duplicates
-  - **Retry**: Failed sends retry with exponential backoff (up to 3 attempts)
-  - **Backpressure**: Max queue size with drop policy for oldest messages
-  - **Pause/Resume**: Queue pauses during disconnection, resumes on reconnect
-
-- **IMClient**: The main orchestrator:
-  - Clean public API: `connect()`, `sendMessage()`, `sendFile()`, `selectFAQ()`, `requestHumanAgent()`
-  - Conversation phase state machine: `BOT → QUEUING → AGENT → CLOSED`
-  - Optimistic updates: Messages appear in UI immediately, status updates follow
-
-### 2. Protocol Design
-
-Every WebSocket frame includes:
-```typescript
-{
-  type: FrameType,     // AUTH, SEND_MESSAGE, HEARTBEAT_PING, etc.
-  seq: number,         // Monotonic sequence number for ordering
-  timestamp: number,   // Server/client timestamp
-  payload: unknown     // Type-specific data
-}
-```
-
-Sequence numbers enable:
-- **Message ordering**: Guarantee display order matches send order
-- **Deduplication**: Detect and drop duplicate frames
-- **Gap detection**: Identify lost messages for re-request
-- **Idempotent retry**: Same seq = same message, safe to retry
-
-### 3. High-QPS Handling
-
-For scenarios like group chats or market data feeds:
-
-1. **Message batching** (MessageQueue): Collect messages over 100ms windows, deliver in batches of 20. Reduces React render cycles from N to ceil(N/20).
-2. **Throttled outgoing**: Prevent client from overwhelming the server with rapid sends.
-3. **Virtualized list** (production): Would use `react-virtuoso` or `react-window` to render only visible messages. Critical when message count > 1000.
-4. **Sequence-based dedup**: Handles network-level duplicates from retries.
-
-### 4. State Management
-
-Zustand was chosen for its:
-- Minimal boilerplate (vs Redux)
-- Hook-based API (natural React integration)
-- Subscriptions with selector-based re-renders (performance)
-- Compatible with Next.js client components
-- Easy integration with the SDK's event-driven architecture
+| Route | Description |
+|-------|-------------|
+| `/` | Landing + floating chat entry (Help & Support) |
+| `/chat` | Friend/group chat (Mock), sidebar + virtuoso list |
+| `/shop` | Redirects to `/zh/shop` or `/en/shop` |
+| `/[locale]/shop` | Shop list (i18n), filters, search |
+| `/[locale]/shop/[id]` | Product detail |
+| `/[locale]/shop/cart` | Cart |
+| `/[locale]/shop/checkout` | Checkout |
+| `/shop2` | Waterfall shop (SSR) |
+| `/ai` | AI chat demo |
+| `/stream` | Stream demo |
+| `/history` | Message history (Mock) |
+| `/test-ws` | WebSocket debug |
+| `/demo-protobuf` | Protobuf demo |
+| `/stress` | Stress test |
+| `/demo/server-actions` | Server Actions demo |
 
 ---
 
-## Conversation Flow
+## Key Design
 
-```
-User clicks "Help & Support"
-        │
-        ▼
-┌─────────────────────────┐
-│     BOT PHASE           │
-│ • Welcome message       │
-│ • FAQ buttons shown     │
-│ • Auto-responses        │
-│ • Keyword matching      │
-└────────┬────────────────┘
-         │ User clicks "Transfer to Human"
-         ▼
-┌─────────────────────────┐
-│     QUEUING PHASE       │
-│ • "Connecting..." msg   │
-│ • Queue position banner │
-│ • Real-time updates     │
-│ • Estimated wait time   │
-└────────┬────────────────┘
-         │ Queue position = 0
-         ▼
-┌─────────────────────────┐
-│     AGENT PHASE         │
-│ • Agent name/code shown │
-│ • Full chat capability  │
-│ • Text, emoji, files    │
-│ • Typing indicators     │
-│ • Read receipts         │
-└─────────────────────────┘
-```
+### SDK (Bottom-up)
+
+- **EventEmitter**: Typed pub/sub; `on` / `once` / `off`, unsubscribe returned.
+- **WebSocketManager**: State machine, exponential backoff reconnection, heartbeat (Ping + Pong timeout), visibility/online recovery; frame protocol with seq.
+- **MessageQueue**: Batching, dedup, retry, backpressure, pause on disconnect.
+- **IMClient**: `connect`, `sendMessage`, `sendFile`, `selectFAQ`, `requestHumanAgent`, `loadHistory`, sync; phase: BOT → QUEUING → AGENT → CLOSED; emits SDKEvent for store.
+- **TIM** (optional): Unified API over IMClient for different frontends.
+- **serializer**: JSON (default) and Protobuf; large frames chunked (e.g. 64KB).
+
+### Protocol
+
+Each WebSocket frame: `{ type, seq, timestamp, payload }`. Seq enables ordering, dedup, gap detection, idempotent retry.
+
+### State
+
+- **Zustand + Immer**: `set(fn)` with draft for nested updates; minimal boilerplate.
+- **Persist** (chatStore only): IndexedDB via `chatPersistStorage` (debounced); partialize `messages` + `conversationId`; merge by max seqId to avoid stale rehydration.
+
+### i18n (Shop)
+
+- Middleware: `/shop` → `/[locale]/shop` using cookie or Accept-Language.
+- `[locale]` layout loads `messages/{locale}.json` and wraps with `IntlProvider`.
+- Script: `npm run i18n:translate` for message translation.
 
 ---
 
 ## Quick Start
 
 ```bash
-# 1. 安装依赖
+# Install
 npm install
 
-# 2. 启动（会同时启动 IM 后端 3001 + Next.js 前端 3000）
+# Run (IM server :3001 + Next.js :3000)
 npm run dev
 ```
 
-**首次运行或端口被占用时**，可先结束占用进程：
+If ports are in use:
+
 ```bash
 lsof -ti:3000 | xargs kill -9
 lsof -ti:3001 | xargs kill -9
 npm run dev
 ```
 
-**访问**：http://127.0.0.1:3000 ，点击「Help & Support」即可开始对话（无需连接钱包）。
+Open **http://127.0.0.1:3000** — click “Help & Support” to start chat (guest login available).
+
+---
 
 ## Tech Stack
 
-- **Next.js 16** (App Router, Turbopack)
+- **Next.js** (App Router, latest)
 - **React 19** + TypeScript
-- **Zustand** for state management
-- **Custom IM SDK** (no third-party IM dependencies)
+- **Zustand** (state) + **Immer** (draft updates)
+- **TanStack React Query**
+- **react-virtuoso** (virtualized message list)
+- **react-markdown** (AI/stream content)
+- **Protobuf** (optional SDK serialization)
+- **ethers** + **SIWE** (wallet auth)
+- **Custom IM SDK** (no third-party IM lib)
+- **i18n**: custom (`messages/`, IntlProvider, middleware)
 
-## Project Structure
+---
+
+## Project Structure (Overview)
 
 ```
 src/
-├── app/                       # Next.js App Router
-│   ├── layout.tsx             # Root layout (Server Component)
-│   ├── page.tsx               # Home page (Server Component)
-│   └── globals.css            # Global styles (Binance dark theme)
-├── sdk/                       # IM SDK (framework-agnostic)
-│   ├── EventEmitter.ts        # Pub/sub event system
-│   ├── WebSocketManager.ts    # WebSocket lifecycle management
-│   ├── MessageQueue.ts        # High-QPS message batching
-│   ├── IMClient.ts            # Main SDK entry point
-│   ├── types.ts               # Type definitions
-│   └── index.ts               # Public API exports
+├── app/
+│   ├── layout.tsx              # Root layout, QueryProvider
+│   ├── page.tsx                # Home (LandingHero + ChatWidget)
+│   ├── globals.css
+│   ├── [locale]/               # i18n segment
+│   │   ├── layout.tsx          # IntlProvider
+│   │   └── shop/               # /zh/shop, /en/shop
+│   │       ├── page.tsx        # List
+│   │       ├── [id]/page.tsx   # Detail
+│   │       ├── cart/page.tsx
+│   │       └── checkout/page.tsx
+│   ├── chat/page.tsx           # Friend/group chat
+│   ├── shop2/                  # Waterfall shop (SSR)
+│   ├── ai/, stream/, history/, test-ws/, stress/, demo*/
+│   └── api/                    # auth, shop/products, ai/chat, rate-limit
+├── sdk/                        # IM SDK
+│   ├── TIM.ts                  # Unified API (optional)
+│   ├── IMClient.ts
+│   ├── WebSocketManager.ts
+│   ├── MessageQueue.ts
+│   ├── EventEmitter.ts
+│   ├── serializer.ts           # JSON / Protobuf, chunking
+│   ├── types.ts
+│   └── index.ts
 ├── store/
-│   └── chatStore.ts           # Zustand store (Client)
-├── components/
-│   ├── LandingHero.tsx        # Landing page hero (Client)
-│   ├── ChatWidget.tsx         # Chat entry point (Client boundary)
-│   ├── ChatWindow.tsx         # Main chat container
-│   ├── Header.tsx             # Connection status & agent info
-│   ├── QueueBanner.tsx        # Queue position indicator
-│   ├── SmartAssistant.tsx     # FAQ navigation pane
-│   ├── MessageList.tsx        # Scrollable message area
-│   ├── MessageItem.tsx        # Individual message bubble
-│   ├── TypingIndicator.tsx    # Typing animation
-│   ├── InputArea.tsx          # Text input + toolbar
-│   ├── EmojiPicker.tsx        # Emoji grid selector
-│   └── FilePreview.tsx        # Image/PDF preview
-└── utils/
-    ├── constants.ts           # App constants
-    └── helpers.ts             # Utility functions
+│   ├── chatStore.ts            # Customer IM (persist)
+│   ├── chatSessionStore.ts     # Friend/group Mock
+│   └── README.md               # Store docs
+├── stores/
+│   └── cartStore.ts            # Shop cart
+├── components/                 # Chat, chat session, shop, ai, shared
+├── lib/                        # i18n, siwe, chatPersistStorage, shop/getProducts
+├── hooks/
+├── messages/                   # zh.json, en.json
+└── middleware.ts               # /shop → /[locale]/shop
+server/                         # Express + WebSocket (port 3001)
 ```
 
-## Production Considerations
+---
 
-If this were deployed to production, additional work would include:
+## Production-Oriented Notes
 
-1. **Real WebSocket server** (Node.js/Go) with Redis pub/sub for horizontal scaling
-2. **Next.js API Routes** for chat history, authentication, file upload endpoints
-3. **Message persistence** in database (MongoDB/PostgreSQL) with cursor-based pagination
-4. **File upload service** (S3/CDN) with pre-signed URLs
-5. **Virtual scrolling** for large message lists (react-virtuoso)
-6. **End-to-end encryption** for sensitive conversations
-7. **Rate limiting** on both client and server
-8. **Message search** with full-text indexing
-9. **Push notifications** via Service Workers
-10. **Internationalization** (i18n) with `next-intl`
+Already in place: WebSocket server, API routes (auth, shop, ai), message persist (IndexedDB), virtual list (react-virtuoso), i18n (shop), rate-limit API.
+
+Further work for production could include: Redis pub/sub for multi-instance WS, DB-backed message history and search, S3/CDN for uploads, E2E encryption, push (Service Worker), and stricter rate limiting.

@@ -5,6 +5,27 @@
  *
  * 性能策略（见 docs/抖音商城风格电商页面方案.md 五）：
  * - 虚拟化：Virtuoso 仅渲染可见区，OVERSCAN 为上下缓冲区条数
+ *
+ * ## Virtuoso「在底部才滚底、看历史不打扰」的实现
+ * 用户停留在底部时新消息平滑滚到底；用户在看历史（不在底部）时不自动滚动，减少无效滚动和重排。
+ * 关键依赖两个 API：
+ * 1. **followOutput**：`(isAtBottom) => isAtBottom ? 'smooth' : false`
+ *    - Virtuoso 在列表末尾追加新项时会调用该函数，传入当前是否在底部。
+ *    - 返回 'smooth' 时会对齐到底部并平滑滚动；返回 false 时不滚动。
+ *    - 因此：在底部 → 新消息来 → 平滑滚底；不在底部 → 不滚，用户继续看历史。
+ *    - 原理（更细）：
+ *      (1) 「是否在底部」判定：Virtuoso 用滚动容器的 scrollTop、scrollHeight、clientHeight 计算——
+ *          若 (scrollTop + clientHeight) 接近 scrollHeight（或在一个小阈值内），则认为 atBottom 为 true；
+ *          用户向上翻看历史时 scrollTop 变小，就不满足，atBottom 为 false。
+ *      (2) 调用时机：当我们的 data（messages）长度增加（新消息 push）导致 React 重渲染，Virtuoso 发现
+ *          列表末尾多了项；它在内部先完成新项的占位/布局（可能先渲染到 DOM），然后调用 followOutput(当前是否在底部)。
+ *      (3) 根据返回值行为：若返回 'smooth' 或 'auto'，Virtuoso 会执行一次滚动到底部（类似 scrollTo 最后一项），
+ *          使视口紧跟新内容；若返回 false，不做任何滚动，视口保持原位置，用户看到的仍是之前的消息区域。
+ *      (4) 效果：只有用户本来就在底部时 isAtBottom 为 true，才会在收到新消息时自动滚底；用户在看历史时
+ *          isAtBottom 为 false，返回 false 不滚动，避免被新消息“拽下去”，减少无效滚动和重排。
+ * 2. **atBottomStateChange**：`(atBottom) => { ... }`
+ *    - 当用户滚动导致「是否在底部」变化时回调，用于更新「回到底部」按钮显隐和 isAtBottomRef。
+ *    - 与 followOutput 配合：Virtuoso 内部用同一套「是否在底部」状态决定 followOutput 的 isAtBottom 参数。
  */
 
 import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react';
@@ -27,7 +48,7 @@ export const MessageList: React.FC = () => {
   // useShallow 浅比较：仅 messages/hasMoreHistory/scrollToInputRequest 等选中字段变化时重渲染
   // scrollToInputRequest：时间戳信号，replyToMessage 时更新，MessageList 滚底、InputArea 聚焦；用 ref 去重避免重复滚动
   // recallMessage：撤回消息，仅本人可撤，已同步服务端；超时则回滚并 Toast 提示
-  const { messages, loadMoreHistory, hasMoreHistory, markAsRead, scrollToInputRequest, editMessage, recallMessage } = useChatStore(
+  const { messages: rawMessages, loadMoreHistory, hasMoreHistory, markAsRead, scrollToInputRequest, editMessage, recallMessage } = useChatStore(
     useShallow((s) => ({
       messages: s.messages,
       loadMoreHistory: s.loadMoreHistory,
@@ -38,6 +59,8 @@ export const MessageList: React.FC = () => {
       recallMessage: s.recallMessage,
     }))
   );
+  /** 保证始终为数组，避免 rehydration 未完成或异常时 data 为 undefined 导致 Virtuoso 报错 */
+  const messages = Array.isArray(rawMessages) ? rawMessages : [];
   const lastScrollRequestRef = useRef(0); // 已处理的 scrollToInputRequest，避免重复滚动
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const pendingReadRef = useRef<Set<string>>(new Set());
@@ -54,7 +77,10 @@ export const MessageList: React.FC = () => {
     setShowScrollBtn(false);
   }, [messages.length]);
 
-  /** Virtuoso 底部状态变化：滚动离开底部时显示「回到底部」按钮 */
+  /**
+   * 关键 API 2/2：atBottomStateChange(atBottom)
+   * 用户滚动导致「是否在底部」变化时调用，用于显隐「回到底部」按钮并同步 isAtBottomRef。
+   */
   const atBottomStateChange = useCallback((atBottom: boolean) => {
     isAtBottomRef.current = atBottom;
     setShowScrollBtn(!atBottom);
@@ -65,7 +91,11 @@ export const MessageList: React.FC = () => {
     if (atTop && hasMoreHistory) loadMoreHistory();
   }, [hasMoreHistory, loadMoreHistory]);
 
-  /** 新消息追加时：仅在底部则平滑滚底，否则不自动滚动 */
+  /**
+   * 关键 API 1/2：followOutput(isAtBottom)
+   * 列表末尾追加新消息时 Virtuoso 会调用此函数。仅在 isAtBottom 为 true 时返回 'smooth' 才会自动滚底；
+   * 用户在看历史（isAtBottom 为 false）时返回 false，不滚动，避免打扰。
+   */
   const followOutput = useCallback((isAtBottom: boolean) => {
     return isAtBottom ? 'smooth' : false;
   }, []);
@@ -144,6 +174,7 @@ export const MessageList: React.FC = () => {
   /** Virtuoso 单条渲染：根据 showAvatarMap 控制头像/昵称，并注入 onVisible/onEdit/onRecall */
   const itemContent = useCallback(
     (index: number, message: Message) => {
+      if (!message) return null;
       const showAvatar = showAvatarMap.get(index) ?? true;
       return (
         <MessageItem
@@ -187,14 +218,14 @@ export const MessageList: React.FC = () => {
     <div className="message-list message-list-virtualized">
       <Virtuoso
         ref={virtuosoRef}
-        style={{ height: '100%' }}
-        data={messages} // 消息列表数据源
+        style={{ height: '100%', minHeight: 0 }}
+        data={messages}
         initialTopMostItemIndex={initialTopMostItemIndex} // 进入会话时滚到底部
-        followOutput={followOutput} // 在底部时新消息平滑滚到底
-        atBottomStateChange={atBottomStateChange} // 控制「回到底部」按钮显隐
+        followOutput={followOutput} // 关键 API1：在底部才滚底，看历史不自动滚动
+        atBottomStateChange={atBottomStateChange} // 关键 API2：底部状态变化 → 回到底部按钮显隐
         atTopStateChange={atTopStateChange} // 向上滚动到顶时加载更多历史
         itemContent={itemContent} // 渲染 MessageItem，并传入 showAvatar、onVisible 等
-        computeItemKey={(_, msg) => msg.id} // 用消息 id 作 key
+        computeItemKey={(i, msg) => msg?.id ?? `msg-${i}`}
         overscan={OVERSCAN} // 视口外多渲染 5 条，减少白屏
         components={components} // 自定义列表容器和底部打字指示器
         className="message-list-virtuoso"
