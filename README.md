@@ -130,7 +130,7 @@ Each WebSocket frame: `{ type, seq, timestamp, payload }`. Seq enables ordering,
 
 - Middleware: `/shop` → `/[locale]/shop` using cookie or Accept-Language.
 - `[locale]` layout loads `messages/{locale}.json` and wraps with `IntlProvider`.
-- Script: `npm run i18n:translate` for message translation.
+- Script: `pnpm run i18n:translate` for message translation.
 
 ---
 
@@ -138,18 +138,20 @@ Each WebSocket frame: `{ type, seq, timestamp, payload }`. Seq enables ordering,
 
 ```bash
 # Install
-npm install
+pnpm install
 
 # Run (IM server :3001 + Next.js :3000)
-npm run dev
+pnpm run dev
 ```
+
+> **若打开聊天提示「IM 后端未启动」**：请执行 `pnpm run dev`（同时启动前端 3000 + 后端 3001），不要只跑 `next dev`。
 
 If ports are in use:
 
 ```bash
 lsof -ti:3000 | xargs kill -9
 lsof -ti:3001 | xargs kill -9
-npm run dev
+pnpm run dev
 ```
 
 Open **http://127.0.0.1:3000** — click “Help & Support” to start chat (guest login available).
