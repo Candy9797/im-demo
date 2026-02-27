@@ -72,7 +72,7 @@ set(fn)	state 是整体 state 的 draft，可随便改
  */
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
-import type { Message } from "@/sdk";
+import type { Message, TradeCardPayload } from "@/sdk";
 import type { Friend, Group } from "@/lib/chatSessionMock";
 import {
   MOCK_FRIENDS,
@@ -89,6 +89,42 @@ export interface ActiveConversation {
   type: ConversationType;
   id: string;
   name: string;
+}
+
+const ACTIVE_CONV_STORAGE_KEY = "im-chat-active-conversation";
+
+function getActiveConversationFromStorage(): ActiveConversation | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(ACTIVE_CONV_STORAGE_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as unknown;
+    if (
+      p &&
+      typeof p === "object" &&
+      "type" in p &&
+      "id" in p &&
+      "name" in p &&
+      (p.type === "c2c" || p.type === "group") &&
+      typeof p.id === "string" &&
+      typeof p.name === "string"
+    ) {
+      return { type: p.type, id: p.id, name: p.name };
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function saveActiveConversationToStorage(conv: ActiveConversation | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (conv) sessionStorage.setItem(ACTIVE_CONV_STORAGE_KEY, JSON.stringify(conv));
+    else sessionStorage.removeItem(ACTIVE_CONV_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
 }
 
 interface ChatSessionState {
@@ -115,6 +151,8 @@ interface ChatSessionState {
   scrollToInputRequest: number;
 
   setActiveConversation: (conv: ActiveConversation | null) => void;
+  /** 客户端挂载时从 sessionStorage 恢复当前会话（便于刷新后恢复草稿） */
+  rehydrateActiveConversation: () => void;
   selectFriend: (friend: Friend) => void;
   selectGroup: (group: Group) => void;
   getMessagesForActive: () => Message[];
@@ -122,6 +160,8 @@ interface ChatSessionState {
   sendImage: (file: File) => void;
   sendVideo: (file: File) => void;
   sendSticker: (stickerId: string) => void;
+  /** 发送交易卡片到当前会话（分享到群/好友） */
+  sendTradeCard: (payload: TradeCardPayload) => void;
   setTyping: (userId: string, isTyping: boolean, groupId?: string) => void;
   setOnline: (userId: string, online: boolean) => void;
   clearUnread: (type: ConversationType, id: string) => void;
@@ -137,13 +177,14 @@ interface ChatSessionState {
 function buildInitialMessages(): Record<string, Message[]> {
   const out: Record<string, Message[]> = {};
   MOCK_FRIENDS.forEach((f) => {
-    out[getConversationKey("c2c", f.id)] = getMessagesForConversation(
-      getConversationKey("c2c", f.id)
-    );
+    const key = getConversationKey("c2c", f.id);
+    out[key] = getMessagesForConversation(key);
   });
   MOCK_GROUPS.forEach((g) => {
     out[g.id] = getMessagesForConversation(g.id);
   });
+  const conversationIds = Object.keys(out);
+  console.log("[chatSession] 会话 ID 列表:", conversationIds);
   return out;
 }
 
@@ -153,7 +194,7 @@ export const useChatSessionStore = create<ChatSessionState>()(
     // ---------- 状态（Mock 初始化，无 WebSocket） ----------
     friends: MOCK_FRIENDS,
     groups: MOCK_GROUPS,
-    activeConversation: null,
+    activeConversation: getActiveConversationFromStorage(),
     messagesByConv: buildInitialMessages(),
     typingByUser: {},
     typingByGroup: {},
@@ -161,23 +202,39 @@ export const useChatSessionStore = create<ChatSessionState>()(
     quoteTarget: null,
     scrollToInputRequest: 0,
 
-    setActiveConversation: (conv) => set({ activeConversation: conv }),
+    setActiveConversation: (conv) => {
+      saveActiveConversationToStorage(conv);
+      set({ activeConversation: conv });
+    },
+
+    rehydrateActiveConversation: () => {
+      const restored = getActiveConversationFromStorage();
+      if (restored) {
+        const current = get().activeConversation;
+        if (!current || current.id !== restored.id || current.type !== restored.type) {
+          set({ activeConversation: restored });
+        }
+      }
+    },
 
     replyToMessage: (msg) =>
       set({ quoteTarget: msg, scrollToInputRequest: Date.now() }),
     setQuoteTarget: (msg) => set({ quoteTarget: msg }),
 
     selectFriend: (friend) => {
-      set({
-        activeConversation: { type: "c2c", id: friend.id, name: friend.name },
-      });
+      const conv = { type: "c2c" as const, id: friend.id, name: friend.name };
+      const convKey = getConversationKey("c2c", friend.id);
+      console.log("[chatSession] 当前会话 ID:", convKey, "| type: c2c | name:", friend.name);
+      saveActiveConversationToStorage(conv);
+      set({ activeConversation: conv });
       get().clearUnread("c2c", friend.id);
     },
 
     selectGroup: (group) => {
-      set({
-        activeConversation: { type: "group", id: group.id, name: group.name },
-      });
+      const conv = { type: "group" as const, id: group.id, name: group.name };
+      console.log("[chatSession] 当前会话 ID:", group.id, "| type: group | name:", group.name);
+      saveActiveConversationToStorage(conv);
+      set({ activeConversation: conv });
       get().clearUnread("group", group.id);
     },
 
@@ -189,7 +246,7 @@ export const useChatSessionStore = create<ChatSessionState>()(
           ? getConversationKey("c2c", activeConversation.id)
           : activeConversation.id;
       return [...(messagesByConv[key] ?? [])].sort(
-        (a, b) => (a.seqId ?? a.timestamp) - (b.seqId ?? b.timestamp)
+        (a, b) => (a.seqId ?? a.timestamp) - (b.seqId ?? b.timestamp),
       );
     },
 
@@ -336,6 +393,33 @@ export const useChatSessionStore = create<ChatSessionState>()(
       });
     },
 
+    sendTradeCard: (payload) => {
+      const { activeConversation, messagesByConv } = get();
+      if (!activeConversation) return;
+      const key =
+        activeConversation.type === "c2c"
+          ? getConversationKey("c2c", activeConversation.id)
+          : activeConversation.id;
+      set((state) => {
+        const list = state.messagesByConv[key] ?? [];
+        const maxSeq = Math.max(0, ...list.map((m) => m.seqId ?? 0));
+        const msg: Message = {
+          id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          conversationId: key,
+          content: `${payload.side === "buy" ? "买入" : "卖出"} ${payload.symbol}`,
+          type: MessageType.TRADE_CARD,
+          status: MessageStatus.READ,
+          senderType: SenderType.USER,
+          senderId: CURRENT_USER_ID,
+          senderName: "Me",
+          timestamp: Date.now(),
+          seqId: maxSeq + 1,
+          metadata: { tradeCard: payload },
+        };
+        state.messagesByConv[key] = [...list, msg];
+      });
+    },
+
     setTyping: (userId, isTyping, groupId) => {
       if (groupId) {
         set((state) => {
@@ -401,7 +485,7 @@ export const useChatSessionStore = create<ChatSessionState>()(
           (x) =>
             x.id === messageId &&
             x.senderId === CURRENT_USER_ID &&
-            x.type === MessageType.TEXT
+            x.type === MessageType.TEXT,
         );
         if (m) m.content = newContent.trim();
       });
@@ -417,7 +501,7 @@ export const useChatSessionStore = create<ChatSessionState>()(
       set((state) => {
         const list = state.messagesByConv[key] ?? [];
         const m = list.find(
-          (x) => x.id === messageId && x.senderId === CURRENT_USER_ID
+          (x) => x.id === messageId && x.senderId === CURRENT_USER_ID,
         );
         if (m) {
           m.content = "已撤回";
@@ -445,7 +529,7 @@ export const useChatSessionStore = create<ChatSessionState>()(
         if (!meta.reactions) meta.reactions = {};
         if (!meta.reactions[emoji]) meta.reactions[emoji] = [];
         meta.reactions[emoji] = meta.reactions[emoji].filter(
-          (u) => u !== CURRENT_USER_ID
+          (u) => u !== CURRENT_USER_ID,
         );
         meta.reactions[emoji].push(CURRENT_USER_ID);
         m.metadata = meta;
@@ -467,11 +551,11 @@ export const useChatSessionStore = create<ChatSessionState>()(
           (m.metadata as { reactions?: Record<string, string[]> }) ?? {};
         if (!meta.reactions?.[emoji]) return;
         meta.reactions[emoji] = meta.reactions[emoji].filter(
-          (u) => u !== CURRENT_USER_ID
+          (u) => u !== CURRENT_USER_ID,
         );
         if (meta.reactions[emoji].length === 0) delete meta.reactions[emoji];
         m.metadata = meta;
       });
     },
-  }))
+  })),
 );

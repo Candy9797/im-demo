@@ -20,11 +20,16 @@ import { useChatSessionStore } from '@/store/chatSessionStore';
 import { EmojiPicker } from '@/components/EmojiPicker';
 import { StickerPicker } from '@/components/StickerPicker';
 import { ChatSessionQuotePreview } from '@/components/chat/ChatSessionQuotePreview';
+import { HoldToTalkButton } from '@/components/HoldToTalkButton';
+import { TradeCardShareModal } from '@/components/TradeCardShareModal';
+import { getDraft, setDraft, clearDraft } from '@/lib/draftStorage';
 import {
   ACCEPTED_IMAGE_TYPES,
   ACCEPTED_VIDEO_TYPES,
   MAX_FILE_SIZE,
 } from '@/utils/constants';
+
+const DRAFT_DEBOUNCE_MS = 500;
 
 export const ChatSessionInput: React.FC = () => {
   // ---------- Store ----------
@@ -32,7 +37,7 @@ export const ChatSessionInput: React.FC = () => {
   // 引用相同（例如切到同一个会话，或 store 没变）：不会重渲染。
   // 引用不同（例如切换会话，store 换了一个新对象）：会触发重渲染。
   // useShallow 检测到引用变化，组件就会重渲染。
-  const { activeConversation, sendMessage, sendImage, sendVideo, sendSticker, scrollToInputRequest } =
+  const { activeConversation, sendMessage, sendImage, sendVideo, sendSticker, sendTradeCard, scrollToInputRequest } =
     useChatSessionStore(
       useShallow((s) => ({
         activeConversation: s.activeConversation,
@@ -40,16 +45,24 @@ export const ChatSessionInput: React.FC = () => {
         sendImage: s.sendImage,
         sendVideo: s.sendVideo,
         sendSticker: s.sendSticker,
+        sendTradeCard: s.sendTradeCard,
         scrollToInputRequest: s.scrollToInputRequest,
       }))
     );
 
   const lastScrollRequestRef = useRef(0);
+  const inputTextRef = useRef('');
+  const prevDraftIdRef = useRef<string | null>(null);
+
+  const draftId = activeConversation ? `chat:${activeConversation.id}` : null;
 
   // ---------- 状态与 ref ----------
   const [inputText, setInputText] = useState('');
+  const [voiceInterim, setVoiceInterim] = useState('');
+  const [restoredFromDraft, setRestoredFromDraft] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
   const [showSticker, setShowSticker] = useState(false);
+  const [showTradeShare, setShowTradeShare] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -93,14 +106,49 @@ export const ChatSessionInput: React.FC = () => {
     }
   }, [scrollToInputRequest]);
 
+  // ---------- 草稿：与 ref 同步 ----------
+  useEffect(() => {
+    inputTextRef.current = inputText;
+  }, [inputText]);
+
+  // ---------- 草稿：切换会话时保存旧会话、加载新会话草稿 ----------
+  useEffect(() => {
+    if (!draftId) {
+      prevDraftIdRef.current = null;
+      return;
+    }
+    const prevId = prevDraftIdRef.current;
+    prevDraftIdRef.current = draftId;
+    if (prevId && prevId !== draftId && inputTextRef.current) {
+      setDraft(prevId, inputTextRef.current);
+    }
+    getDraft(draftId).then((text) => {
+      setInputText(text ?? '');
+      setRestoredFromDraft(!!(text && text.trim()));
+    });
+  }, [draftId]);
+
+  // ---------- 草稿：防抖写入 IndexedDB ----------
+  useEffect(() => {
+    if (!draftId) return;
+    const t = setTimeout(() => {
+      const text = inputTextRef.current;
+      if (text.trim()) setDraft(draftId, text);
+      else clearDraft(draftId);
+    }, DRAFT_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [draftId, inputText]);
+
   // ---------- 交互 ----------
   const handleSend = useCallback(() => {
     if (!inputText.trim()) return;
     sendMessage(inputText.trim());
     setInputText('');
     setShowEmoji(false);
+    setRestoredFromDraft(false);
+    if (draftId) clearDraft(draftId);
     inputRef.current?.focus();
-  }, [inputText, sendMessage]);
+  }, [inputText, sendMessage, draftId]);
 
   // Enter 发送，Shift+Enter 换行（不阻止默认即换行）
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -250,7 +298,24 @@ export const ChatSessionInput: React.FC = () => {
             <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
           </svg>
         </button>
+        <button
+          className="chat-toolbar-btn"
+          onClick={() => { setShowEmoji(false); setShowSticker(false); setShowTradeShare(true); }}
+          title="分享交易卡片"
+          aria-label="分享交易卡片"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="2" y="4" width="20" height="14" rx="2" ry="2" />
+            <path d="M2 10h20" />
+            <path d="M6 14h4" />
+          </svg>
+        </button>
       </div>
+      <TradeCardShareModal
+        open={showTradeShare}
+        onClose={() => setShowTradeShare(false)}
+        onShare={(payload) => sendTradeCard(payload)}
+      />
 
       {/* 隐藏的 file input，通过 toolbar 按钮 click 触发 */}
       <input
@@ -268,7 +333,23 @@ export const ChatSessionInput: React.FC = () => {
         style={{ display: 'none' }}
       />
 
-      {/* 文本输入 + 发送按钮 */}
+      {/* 已恢复未发送内容提示 */}
+      {restoredFromDraft && (
+        <div className="draft-restored-banner" role="status">
+          <span>已恢复未发送内容，可继续编辑或发送</span>
+          <button type="button" className="draft-restored-dismiss" onClick={() => setRestoredFromDraft(false)} aria-label="关闭">
+            ×
+          </button>
+        </div>
+      )}
+      {/* 实时语音识别提示：按住说话时显示 */}
+      {voiceInterim && (
+        <div className="chat-session-voice-interim" role="status">
+          <span className="chat-session-voice-interim-label">正在识别：</span>
+          {voiceInterim}
+        </div>
+      )}
+      {/* 文本输入 + 按住说话 + 发送按钮 */}
       <div className="chat-session-input-row">
         <textarea
           ref={inputRef}
@@ -276,8 +357,20 @@ export const ChatSessionInput: React.FC = () => {
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="输入消息..."
+          placeholder="输入消息，或按住右侧麦克风说话..."
           rows={1}
+        />
+        <HoldToTalkButton
+          lang="zh-CN"
+          onResult={(text) => {
+            setInputText((prev) => (prev ? prev + text : text));
+            setTimeout(() => inputRef.current?.focus(), 50);
+          }}
+          onInterim={setVoiceInterim}
+          onEnd={() => setVoiceInterim('')}
+          holdTitle="按住说话"
+          unsupportedTitle="当前浏览器不支持语音输入"
+          className="chat-session-voice-btn"
         />
         <button
           className="send-btn"

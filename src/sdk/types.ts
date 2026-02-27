@@ -18,6 +18,7 @@ export const MessageType = {
   STICKER: "sticker",     // 贴纸
   VOICE: "voice",         // 语音
   VIDEO: "video",         // 视频
+  TRADE_CARD: "trade_card", // 交易卡片（分享到群/好友）
 } as const;
 export type MessageType = (typeof MessageType)[keyof typeof MessageType];
 
@@ -65,12 +66,26 @@ export interface QuoteInfo {
   timestamp: number;
 }
 
+/** 交易卡片 payload（仿币安分享结构，存于 metadata.tradeCard） */
+export interface TradeCardPayload {
+  symbol: string;        // 交易对，如 BTCUSDT
+  side: "buy" | "sell"; // 买/卖
+  price: string;        // 成交价
+  quantity: string;     // 数量
+  quoteAmount?: string; // 成交额（可选）
+  pnl?: string;         // 盈亏金额（可选）
+  pnlPercent?: string;  // 盈亏比例（可选）
+  time: number;         // 成交时间戳
+  fee?: string;         // 手续费（可选）
+}
+
 /** 消息元数据（引用、已读、表情反应等） */
 export interface MessageMetadata {
   reactions?: Record<string, string[]>;  // emoji -> userId[]，谁点了哪个表情
   mentions?: string[];                   // @提及的 userIds
   readBy?: string[];                     // 已读该消息的 userIds
   quote?: QuoteInfo;                     // 引用回复的目标消息
+  tradeCard?: TradeCardPayload;          // 交易卡片数据（type=TRADE_CARD 时）
   [key: string]: unknown;
 }
 

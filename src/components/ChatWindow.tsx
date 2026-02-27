@@ -4,7 +4,7 @@
  * 聊天主容器：Header、QueueBanner、MessageList、SmartAssistant、InputArea
  * 未登录时显示 SmartAssistant，已登录显示消息列表
  */
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useChatStore, countUnread } from '@/store/chatStore';
 import { Header } from '@/components/Header';
@@ -16,7 +16,7 @@ import { Toast } from '@/components/Toast';
 
 export const ChatWindow: React.FC = () => {
   // useShallow：浅比较，仅 isOpen/isMinimized/messages/auth 变化时更新（开关、折叠、未读数、登录态）
-  const { isOpen, isMinimized, isExpanded, initialize, messages, auth } = useChatStore(
+  const { isOpen, isMinimized, isExpanded, initialize, messages, auth, simulateIncomingMessages } = useChatStore(
     useShallow((s) => ({
       isOpen: s.isOpen,
       isMinimized: s.isMinimized,
@@ -24,8 +24,10 @@ export const ChatWindow: React.FC = () => {
       initialize: s.initialize,
       messages: s.messages,
       auth: s.auth,
+      simulateIncomingMessages: s.simulateIncomingMessages,
     }))
   );
+  const [simulateCount, setSimulateCount] = useState(10);
   const unreadCount = countUnread(messages, auth?.userId);
 
   useEffect(() => {
@@ -50,10 +52,33 @@ export const ChatWindow: React.FC = () => {
     );
   }
 
+  const handleSimulateSend = () => {
+    const n = Math.min(100, Math.max(1, Number(simulateCount) || 10));
+    setSimulateCount(n);
+    simulateIncomingMessages(n);
+  };
+
   return (
     <div className={`chat-window${isExpanded ? ' expanded' : ''}`}>
       <Header />
       <QueueBanner />
+      {auth && (
+        <div className="chat-window-simulate-bar">
+          <input
+            type="number"
+            min={1}
+            max={100}
+            value={simulateCount}
+            onChange={(e) => setSimulateCount(Number(e.target.value) || 10)}
+            className="chat-window-simulate-input"
+            aria-label="模拟条数"
+          />
+          <span className="chat-window-simulate-label">条</span>
+          <button type="button" onClick={handleSimulateSend} className="chat-window-simulate-btn">
+            模拟对方连发
+          </button>
+        </div>
+      )}
       <div className="chat-body">
         <MessageList />
         <SmartAssistant />

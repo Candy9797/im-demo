@@ -1,7 +1,7 @@
 /**
  * 流式 SSR 页面 - 供 Node renderToPipeableStream 使用
  *
- * 使用 React 19 use() + Suspense 实现数据获取挂起，
+ * 使用 React 19 use() + Suspense 实现数据获取挂起
  * 各 Block 独立 resolve 后逐步流式输出 HTML
  */
 import React, { use, useState } from "react";

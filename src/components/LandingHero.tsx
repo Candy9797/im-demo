@@ -87,6 +87,8 @@ export const LandingHero = () => {
           <a href="/shop" className="landing-link">淘宝商城</a>
           <a href="/ai" className="landing-link">AI 问答</a>
           <a href="/chat" className="landing-link">聊天（好友 / 群组）</a>
+          <a href="/demo/ssr-traditional" className="landing-link">传统 SSR 演示</a>
+          <a href="/demo/ssr-streaming" className="landing-link">流式 SSR 演示</a>
           <a href="/stream" className="landing-link">流式 SSR（Next.js）</a>
           <a href="http://127.0.0.1:3001/stream" className="landing-link" target="_blank" rel="noopener noreferrer">流式 SSR（Node）</a>
           <a href="/history" className="landing-history-link">会话历史 / 性能测试</a>

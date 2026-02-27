@@ -28,7 +28,12 @@ import { useChatStore } from '@/store/chatStore';
 import { EmojiPicker } from '@/components/EmojiPicker';
 import { StickerPicker } from '@/components/StickerPicker';
 import { QuotePreview } from '@/components/QuotePreview';
+import { HoldToTalkButton } from '@/components/HoldToTalkButton';
+import { getDraft, setDraft, clearDraft } from '@/lib/draftStorage';
 import { ACCEPTED_FILE_TYPES, MAX_FILE_SIZE } from '@/utils/constants';
+
+const DRAFT_DEBOUNCE_MS = 500;
+const DRAFT_ID_CUSTOMER_SERVICE = 'customer-service';
 
 export const InputArea: React.FC = () => {
   // ---------- Store ----------
@@ -43,9 +48,12 @@ export const InputArea: React.FC = () => {
     }))
   );
   const lastScrollRequestRef = useRef(0);
+  const textRef = useRef('');
 
   // ---------- 状态与 ref ----------
   const [text, setText] = useState('');
+  const [voiceInterim, setVoiceInterim] = useState('');
+  const [restoredFromDraft, setRestoredFromDraft] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
   const [showSticker, setShowSticker] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -76,6 +84,30 @@ export const InputArea: React.FC = () => {
     return () => window.removeEventListener('resize', updatePickerPosition);
   }, [showSticker, showEmoji, updatePickerPosition]);
 
+  // ---------- 草稿：与 ref 同步 ----------
+  useEffect(() => {
+    textRef.current = text;
+  }, [text]);
+
+  // ---------- 草稿：挂载时恢复未发送内容 ----------
+  useEffect(() => {
+    getDraft(DRAFT_ID_CUSTOMER_SERVICE).then((saved) => {
+      if (saved && saved.trim()) {
+        setText(saved);
+        setRestoredFromDraft(true);
+      }
+    });
+  }, []);
+
+  // ---------- 草稿：防抖写入 IndexedDB ----------
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (textRef.current.trim()) setDraft(DRAFT_ID_CUSTOMER_SERVICE, textRef.current);
+      else clearDraft(DRAFT_ID_CUSTOMER_SERVICE);
+    }, DRAFT_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [text]);
+
   // 点击回复时 scrollToInputRequest 更新，聚焦输入框
   useEffect(() => {
     if (scrollToInputRequest && scrollToInputRequest !== lastScrollRequestRef.current) {
@@ -90,6 +122,8 @@ export const InputArea: React.FC = () => {
     sendMessage(text);
     setText('');
     setShowEmoji(false);
+    setRestoredFromDraft(false);
+    clearDraft(DRAFT_ID_CUSTOMER_SERVICE);
     inputRef.current?.focus();
   }, [text, isConnected, sendMessage]);
 
@@ -226,7 +260,23 @@ export const InputArea: React.FC = () => {
         />
       </div>
 
-      {/* 文本输入 + 发送按钮 */}
+      {/* 已恢复未发送内容提示 */}
+      {restoredFromDraft && (
+        <div className="draft-restored-banner" role="status">
+          <span>已恢复未发送内容，可继续编辑或发送</span>
+          <button type="button" className="draft-restored-dismiss" onClick={() => setRestoredFromDraft(false)} aria-label="关闭">
+            ×
+          </button>
+        </div>
+      )}
+      {/* 实时语音识别提示 */}
+      {voiceInterim && (
+        <div className="chat-session-voice-interim" role="status">
+          <span className="chat-session-voice-interim-label">正在识别：</span>
+          {voiceInterim}
+        </div>
+      )}
+      {/* 文本输入 + 按住说话 + 发送按钮 */}
       <div className="input-row">
         <textarea
           ref={inputRef}
@@ -234,9 +284,21 @@ export const InputArea: React.FC = () => {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={isConnected ? 'Type a message...' : 'Connecting...'}
+          placeholder={isConnected ? '输入消息，或按住麦克风说话...' : 'Connecting...'}
           disabled={!isConnected}
           rows={1}
+        />
+        <HoldToTalkButton
+          lang="zh-CN"
+          onResult={(voiceText) => {
+            setText((prev) => (prev ? prev + voiceText : voiceText));
+            setTimeout(() => inputRef.current?.focus(), 50);
+          }}
+          onInterim={setVoiceInterim}
+          onEnd={() => setVoiceInterim('')}
+          holdTitle="按住说话"
+          unsupportedTitle="当前浏览器不支持语音输入"
+          disabled={!isConnected}
         />
         <button
           className="send-btn"

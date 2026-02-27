@@ -10,6 +10,7 @@ import { type Message, type QuoteInfo, MessageType, MessageStatus, SenderType } 
 import { FilePreview } from '@/components/FilePreview';
 import { RichTextContent } from '@/components/RichTextContent';
 import { UrlPreviewCard, extractUrls } from '@/components/UrlPreviewCard';
+import { TradeCard } from '@/components/TradeCard';
 import { MessageReactions } from '@/components/MessageReactions';
 import { MessageQuoteBlock } from '@/components/MessageQuoteBlock';
 import { ConfirmModal } from '@/components/ConfirmModal';
@@ -234,6 +235,15 @@ export const MessageItem = React.memo<MessageItemProps>(function MessageItem({
         );
       case MessageType.VIDEO:  // 视频
         return <FilePreview message={message} />;
+      case MessageType.TRADE_CARD:  // 交易卡片（分享到群）
+        const tradeCard = message.metadata?.tradeCard;
+        return tradeCard ? (
+          <div className="msg-trade-card-wrap">
+            <TradeCard payload={tradeCard} />
+          </div>
+        ) : (
+          <span className="msg-text">[交易卡片]</span>
+        );
       case MessageType.TEXT:  // 文本：富文本 + URL 预览
       default: {
         const urls = extractUrls(message.content);  // 从文本提取链接

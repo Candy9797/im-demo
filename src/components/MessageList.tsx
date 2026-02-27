@@ -26,6 +26,25 @@
  * 2. **atBottomStateChange**：`(atBottom) => { ... }`
  *    - 当用户滚动导致「是否在底部」变化时回调，用于更新「回到底部」按钮显隐和 isAtBottomRef。
  *    - 与 followOutput 配合：Virtuoso 内部用同一套「是否在底部」状态决定 followOutput 的 isAtBottom 参数。
+ *
+ * ## 底层实现原理（为什么能做到这样）
+ * Virtuoso 底层是一个可滚动的 DOM 容器（如 div，overflow: auto），加上虚拟化（只渲染可见项 + overscan）。
+ * (1) **「是否在底部」**：用浏览器原生滚动属性计算。滚动容器有 scrollTop（已滚过的高度）、scrollHeight（内容总高）、
+ *     clientHeight（可视高度）。当 scrollTop + clientHeight ≥ scrollHeight - 阈值 时视为在底部；用户向上翻则 scrollTop
+ *     变小，不满足。Virtuoso 在滚动事件或 layout 后更新这套状态，并通知 atBottomStateChange。
+ * (2) **「新项追加后是否滚底」**：data 变长时，Virtuoso 先更新内部列表长度、把新项占位/渲染进 DOM（内容变高，
+ *     scrollHeight 增大），此时若不改 scrollTop，视口会停在原位置（相当于“没跟到底”）。然后 Virtuoso 调用
+ *     followOutput(isAtBottom)。若返回 'smooth'/'auto'，库内部会把 scrollTop 设为 scrollHeight - clientHeight
+ *     （或 scrollTo 最后一项），即程序化地滚到底部；若返回 false，不修改 scrollTop，视口不动。
+ * (3) **为何能“在底部才滚、看历史不滚”**：isAtBottom 是在「新内容插入前」或「插入瞬间」根据当前 scroll 算出来的，
+ *     所以若用户本来就在底部，isAtBottom 为 true，返回 'smooth' 就会滚底；若用户在看历史，isAtBottom 为 false，
+ *     返回 false 就不滚。决策权在 followOutput 的返回值，底层只是“要不要执行一次 scrollTo 底部”的开关。
+ *
+ * ## 滚动时图片闪动
+ * 虚拟列表滚动时，图片可能因「先空白再加载」或「复用时重新加载」而闪动。本项目的处理：
+ * - **FilePreview**：图片容器预留宽高比（aspect-ratio 4/3）+ 最小高度，加载前用同色占位、加载完成后淡入（opacity）；
+ *   使用 decoding="async" 减少解码阻塞；避免未预留空间导致的布局抖动。
+ * - **OVERSCAN**：视口外多渲染 5 条，滚动时更多项保持挂载，减少「刚进入视口才挂载」带来的闪动；若仍明显可适当调大 OVERSCAN。
  */
 
 import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react';
@@ -68,6 +87,11 @@ export const MessageList: React.FC = () => {
   const [showScrollBtn, setShowScrollBtn] = useState(false); // 是否显示「回到底部」按钮
   const isAtBottomRef = useRef(true); // 是否在底部，供外部逻辑判断
 
+  /**
+   * 滚动到底部（最后一条消息）。
+   * 作用：用户点击「回到底部」按钮时调用，或外部需要滚底时使用。通过 Virtuoso 的 scrollToIndex 滚到
+   * 最后一项；smooth 为 true 时平滑滚动，为 false 时瞬间跳转。同时把 isAtBottomRef 置为 true、隐藏「回到底部」按钮。
+   */
   const scrollToBottom = useCallback((smooth = true) => {
     virtuosoRef.current?.scrollToIndex({
       index: messages.length - 1,

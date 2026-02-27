@@ -58,6 +58,30 @@ import {
 /** 撤回失败时用于回滚乐观更新（recall_expired） */
 let _pendingRecallRevert: { messageId: string; content: string } | null = null;
 
+const CHAT_WINDOW_OPEN_KEY = "im-chat-window-open";
+const CHAT_WINDOW_MINIMIZED_KEY = "im-chat-window-minimized";
+
+function getChatWindowStateFromStorage(): { isOpen: boolean; isMinimized: boolean } {
+  if (typeof window === "undefined") return { isOpen: false, isMinimized: false };
+  try {
+    const open = sessionStorage.getItem(CHAT_WINDOW_OPEN_KEY) === "1";
+    const minimized = sessionStorage.getItem(CHAT_WINDOW_MINIMIZED_KEY) === "1";
+    return { isOpen: open, isMinimized: minimized };
+  } catch {
+    return { isOpen: false, isMinimized: false };
+  }
+}
+
+function saveChatWindowStateToStorage(isOpen: boolean, isMinimized: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(CHAT_WINDOW_OPEN_KEY, isOpen ? "1" : "0");
+    sessionStorage.setItem(CHAT_WINDOW_MINIMIZED_KEY, isMinimized ? "1" : "0");
+  } catch {
+    // ignore
+  }
+}
+
 /** 未读消息数：来自 Bot/Agent 且 status !== read 的消息 */
 export function countUnread(
   messages: Message[],
@@ -161,6 +185,8 @@ interface ChatState {
   setFormat: (format: SerializeFormat) => void;
   /** 请求服务端推送 N 条 Mock 消息（用于 Protobuf/分片 Demo） */
   requestSimulatePush: (count: number) => void;
+  /** 本地模拟对方一次性发送 N 条消息（不经过 WS，直接写入 store，用于压测/演示） */
+  simulateIncomingMessages: (count: number) => void;
 }
 
 export const useChatStore = create<ChatState>()(
@@ -182,9 +208,8 @@ export const useChatStore = create<ChatState>()(
       faqItems: DEFAULT_FAQ_ITEMS,
       typing: { isTyping: false, senderType: null },
       queue: null,
-      isMinimized: false,
+      ...getChatWindowStateFromStorage(),
       isExpanded: false,
-      isOpen: false,
       showWalletModal: false,
       wantFreshStart: false,
       onlineUsers: [],
@@ -575,6 +600,7 @@ export const useChatStore = create<ChatState>()(
           isOpen: true,
           hasMoreHistory: true,
         });
+        saveChatWindowStateToStorage(true, get().isMinimized);
       },
 
       // ---------- 消息操作 ----------
@@ -618,6 +644,7 @@ export const useChatStore = create<ChatState>()(
       toggleMinimize: () =>
         set((state) => {
           state.isMinimized = !state.isMinimized;
+          saveChatWindowStateToStorage(state.isOpen, state.isMinimized);
         }),
       toggleExpand: () =>
         set((state) => {
@@ -626,6 +653,7 @@ export const useChatStore = create<ChatState>()(
       toggleOpen: () =>
         set((state) => {
           state.isOpen = !state.isOpen;
+          saveChatWindowStateToStorage(state.isOpen, state.isMinimized);
         }),
 
       /** 滚动到顶部时拉取更早历史：取当前最小 seq，发 load_history */
@@ -750,6 +778,35 @@ export const useChatStore = create<ChatState>()(
       requestSimulatePush: (count: number) => {
         const { client } = get();
         client?.requestSimulatePush(count);
+      },
+
+      /** 本地模拟对方一次性发送 N 条消息（不经过 WS），用于智能会话页压测/演示 */
+      simulateIncomingMessages: (count: number) => {
+        const { conversationId, phase, messages } = get();
+        if (!conversationId || count < 1) return;
+        const maxSeq = Math.max(0, ...messages.map((m) => m.seqId ?? 0));
+        const senderType = phase === ConversationPhase.AGENT ? SenderType.AGENT : SenderType.BOT;
+        const senderId = phase === ConversationPhase.AGENT ? "agent-1" : "bot";
+        const senderName = phase === ConversationPhase.AGENT ? "客服" : "Bot";
+        const baseTime = Date.now();
+        const newMessages: Message[] = [];
+        for (let i = 0; i < count; i++) {
+          newMessages.push({
+            id: `sim-${baseTime}-${i}-${Math.random().toString(36).slice(2, 9)}`,
+            conversationId,
+            content: `模拟消息 ${i + 1}`,
+            type: MessageType.TEXT,
+            status: MessageStatus.READ,
+            senderType,
+            senderId,
+            senderName,
+            timestamp: baseTime + i,
+            seqId: maxSeq + i + 1,
+          });
+        }
+        set((state) => {
+          for (const m of newMessages) state.messages.push({ ...m });
+        });
       },
 
       /** 销毁：断开连接、移除监听、重置所有状态 */

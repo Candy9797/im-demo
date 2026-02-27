@@ -436,14 +436,28 @@ html, body {
   color: var(--text-tertiary);
 }
 
+.chat-session-conv-id {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  font-family: ui-monospace, monospace;
+}
+
 .chat-session-messages {
   flex: 1;
   min-height: 0;
   position: relative;
 }
 
+/* 隐藏消息列表滚动条，保留滚动（鼠标滚轮/触控仍可用） */
 .chat-session-virtuoso {
   padding: 1rem 1.5rem;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE / Edge */
+}
+.chat-session-virtuoso::-webkit-scrollbar,
+.chat-session-messages ::-webkit-scrollbar {
+  display: none; /* Chrome / Safari / Edge（含 Virtuoso 内部滚动容器） */
 }
 
 .chat-session-typing {
@@ -875,6 +889,56 @@ html, body {
 @keyframes queueSlide {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(400%); }
+}
+
+/* ============ 模拟对方连发（智能会话页调试/压测） ============ */
+
+.chat-window-simulate-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--surface-secondary, #1e1e2e);
+  border-bottom: 1px solid var(--border-subtle, #2a2a3a);
+  flex-shrink: 0;
+}
+
+.chat-window-simulate-input {
+  width: 72px;
+  padding: 8px 10px;
+  font-size: 15px;
+  border: 1px solid var(--border-subtle, #2a2a3a);
+  border-radius: 6px;
+  background: var(--bg-input, #252535);
+  color: var(--text-primary, #e4e4e7);
+  text-align: center;
+}
+
+.chat-window-simulate-input:focus {
+  outline: none;
+  border-color: var(--brand, #6366f1);
+}
+
+.chat-window-simulate-label {
+  font-size: 12px;
+  color: var(--text-tertiary, #71717a);
+}
+
+.chat-window-simulate-btn {
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: none;
+  background: #eab308;
+  color: #1a1a1a;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(234, 179, 8, 0.4);
+}
+
+.chat-window-simulate-btn:hover {
+  background: #facc15;
+  box-shadow: 0 2px 6px rgba(234, 179, 8, 0.5);
 }
 
 /* ============ Chat Body ============ */
@@ -1539,6 +1603,175 @@ html, body {
   text-decoration: underline;
 }
 
+/* ============ 交易卡片（仿币安） ============ */
+.msg-trade-card-wrap {
+  padding: 2px 0;
+}
+.trade-card {
+  --trade-bg: #1e2329;
+  --trade-border: #2b3139;
+  --trade-brand: #f0b90b;
+  --trade-buy: #0ecb81;
+  --trade-sell: #f6465d;
+  min-width: 260px;
+  max-width: 320px;
+  background: var(--trade-bg);
+  border: 1px solid var(--trade-border);
+  border-radius: 12px;
+  overflow: hidden;
+  font-size: 0.8125rem;
+}
+.trade-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(240, 185, 11, 0.08);
+  border-bottom: 1px solid var(--trade-border);
+}
+.trade-card-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--trade-brand);
+  color: #0b0e11;
+  border-radius: 6px;
+}
+.trade-card-symbol {
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+}
+.trade-card-side {
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.75rem;
+}
+.trade-card-side.buy {
+  background: rgba(14, 203, 129, 0.15);
+  color: var(--trade-buy);
+}
+.trade-card-side.sell {
+  background: rgba(246, 70, 93, 0.15);
+  color: var(--trade-sell);
+}
+.trade-card-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.trade-card-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.trade-card-label {
+  color: var(--text-tertiary);
+}
+.trade-card-value {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.trade-card-pnl.profit { color: var(--trade-buy); }
+.trade-card-pnl.loss { color: var(--trade-sell); }
+.trade-card-pnl-pct { font-size: 0.75rem; opacity: 0.9; }
+.trade-card-fee { color: var(--text-tertiary); font-size: 0.75rem; }
+.trade-card-footer {
+  padding: 6px 12px;
+  border-top: 1px solid var(--trade-border);
+  background: rgba(0,0,0,0.2);
+}
+.trade-card-time {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+}
+
+/* 交易卡片分享弹窗 */
+.trade-share-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10020;
+}
+.trade-share-modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.25rem;
+  min-width: 320px;
+  max-width: 95vw;
+}
+.trade-share-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+.trade-share-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.trade-share-close {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.trade-share-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.trade-share-preview {
+  margin-bottom: 1rem;
+  display: flex;
+  justify-content: center;
+}
+.trade-share-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.trade-share-btn {
+  padding: 8px 14px;
+  font-size: 0.875rem;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+}
+.trade-share-btn.demo {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-light);
+}
+.trade-share-btn.demo:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.trade-share-btn.primary {
+  background: var(--brand);
+  color: var(--bg-primary);
+}
+.trade-share-btn.primary:hover {
+  background: var(--brand-hover);
+}
+
 /* ============ URL Preview Card ============ */
 
 .url-preview-card {
@@ -1948,6 +2181,101 @@ html, body {
 .send-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
+}
+
+/* 按住说话语音输入 */
+.hold-to-talk-btn {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+.hold-to-talk-btn:hover:not(:disabled):not(.unsupported) {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.hold-to-talk-btn.listening {
+  background: rgba(246, 70, 93, 0.2);
+  color: var(--danger);
+  border-color: var(--danger);
+  animation: hold-to-talk-pulse 1s ease-in-out infinite;
+}
+.hold-to-talk-btn.unsupported {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.hold-to-talk-btn.chat-session-voice-btn {
+  margin-left: 0;
+}
+
+/* 实时语音识别文案（按住说话时显示） */
+.chat-session-voice-interim {
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--danger);
+  min-height: 1.5em;
+}
+.chat-session-voice-interim-label {
+  color: var(--text-tertiary);
+  margin-right: 4px;
+}
+
+/* 已恢复未发送内容提示条 */
+.draft-restored-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  background: rgba(30, 159, 242, 0.12);
+  border: 1px solid rgba(30, 159, 242, 0.3);
+  border-radius: var(--radius-sm);
+}
+.draft-restored-dismiss {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.draft-restored-dismiss:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+@keyframes hold-to-talk-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+.hold-to-talk-error {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translateX(-50%);
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--danger);
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 /* ============ Emoji Picker ============ */

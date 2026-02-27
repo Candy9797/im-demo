@@ -2,6 +2,8 @@
 
 /**
  * 文件预览：图片（缩略图 + 点击放大）、PDF（文件名和大小）
+ *
+ * 滚动防闪：图片容器预留宽高比、加载前占位、decoding="async"，减少虚拟列表滚动时白屏/闪动。
  */
 
 import React, { useState } from 'react';
@@ -14,17 +16,41 @@ interface FilePreviewProps {
 
 export const FilePreview: React.FC<FilePreviewProps> = ({ message }) => {
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
 
   if (message.type === MessageType.IMAGE) {
     return (
       <>
-        <div className="file-preview image-preview" onClick={() => setIsLightboxOpen(true)}>
+        <div
+          className="file-preview image-preview"
+          onClick={() => setIsLightboxOpen(true)}
+          style={{ aspectRatio: '4/3', minHeight: 80, maxWidth: 220, position: 'relative', backgroundColor: 'var(--tb-bg-secondary, #1e2329)' }}
+        >
+          {!imageLoaded && (
+            <div
+              className="image-preview-placeholder"
+              style={{ position: 'absolute', inset: 0, background: 'var(--tb-bg-secondary, #1e2329)' }}
+              aria-hidden
+            />
+          )}
           <img
             src={message.content}
             alt="Shared image"
             loading="lazy"
+            decoding="async"
+            onLoad={() => setImageLoaded(true)}
             onError={(e) => {
               (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect fill="%231e2329" width="120" height="80"/><text x="60" y="45" fill="%23848e9c" text-anchor="middle" font-size="12">Image</text></svg>';
+              setImageLoaded(true);
+            }}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain',
+              opacity: imageLoaded ? 1 : 0,
+              transition: 'opacity 0.15s ease-out',
             }}
           />
         </div>
