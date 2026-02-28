@@ -135,6 +135,10 @@ wss.on("connection", (ws, req) => {
   handleConnection(ws as any, token, fresh, kickOthers, format);
 });
 
-server.listen(PORT, () => {
-  console.log(`[IM Server] HTTP + WS listening on port ${PORT}`);
-});
+(async () => {
+  const { initDb } = await import("./db");
+  await initDb();
+  server.listen(PORT, () => {
+    console.log(`[IM Server] HTTP + WS listening on port ${PORT}`);
+  });
+})();

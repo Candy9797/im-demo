@@ -50,7 +50,7 @@
 import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { useShallow } from 'zustand/react/shallow';
-import { useChatStore, registerChatScrollToBottom } from '@/store/chatStore';
+import { useChatStore, registerChatScrollToBottom, registerRecallWithCompensation } from '@/store/chatStore';
 import { MessageItem } from '@/components/MessageItem';
 import { TypingIndicator } from '@/components/TypingIndicator';
 import type { Message } from '@/sdk';
@@ -62,12 +62,13 @@ const OVERSCAN = 5;
 const MARK_READ_DEBOUNCE_MS = 200;
 /** 已读批量上报：单次最大条数，达到即立即上报 */
 const MARK_READ_BATCH_SIZE = 20;
-
+/** 撤回后「已撤回」单行预估高度（px），用于滚动补偿 */
+/** 撤回后单条预估高度（含气泡、时间等），偏小会补偿过头导致滑得太后上面 */
 export const MessageList: React.FC = () => {
   // useShallow 浅比较：仅 messages/hasMoreHistory/scrollToInputRequest 等选中字段变化时重渲染
   // scrollToInputRequest：时间戳信号，replyToMessage 时更新，MessageList 滚底、InputArea 聚焦；用 ref 去重避免重复滚动
   // recallMessage：撤回消息，仅本人可撤，已同步服务端；超时则回滚并 Toast 提示
-  const { messages: rawMessages, loadMoreHistory, hasMoreHistory, markAsRead, scrollToInputRequest, editMessage, recallMessage } = useChatStore(
+  const { messages: rawMessages, loadMoreHistory, hasMoreHistory, markAsRead, scrollToInputRequest, editMessage, recallMessage, recallWithCompensation } = useChatStore(
     useShallow((s) => ({
       messages: s.messages,
       loadMoreHistory: s.loadMoreHistory,
@@ -76,6 +77,7 @@ export const MessageList: React.FC = () => {
       scrollToInputRequest: s.scrollToInputRequest,
       editMessage: s.editMessage,
       recallMessage: s.recallMessage,
+      recallWithCompensation: s.recallWithCompensation,
     }))
   );
   /** 保证始终为数组，避免 rehydration 未完成或异常时 data 为 undefined 导致 Virtuoso 报错 */
@@ -83,8 +85,10 @@ export const MessageList: React.FC = () => {
   const lastScrollRequestRef = useRef(0); // 已处理的 scrollToInputRequest，避免重复滚动
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const pendingReadRef = useRef<Set<string>>(new Set());
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const pendingRecallCompensationRef = useRef<{ messageId: string; oldHeight: number } | null>(null);
 
-  /** 向 store 注册滚底回调：发消息后 store 直接调用，不依赖 effect，确保能滚到底部 */
+  /** 向 store 注册滚底回调 + 撤回补偿回调（模拟对方撤回等会触发补偿） */
   useEffect(() => {
     registerChatScrollToBottom(() => {
       const n = useChatStore.getState().messages.length;
@@ -94,8 +98,23 @@ export const MessageList: React.FC = () => {
       isAtBottomRef.current = true;
       setShowScrollBtn(false);
     });
-    return () => registerChatScrollToBottom(null);
+    registerRecallWithCompensation((messageId, previousHeight) => {
+      pendingRecallCompensationRef.current = { messageId, oldHeight: previousHeight };
+    });
+    return () => {
+      registerChatScrollToBottom(null);
+      registerRecallWithCompensation(null);
+    };
   }, []);
+
+  /** 撤回后仅清空 pending。Virtuoso 在 item 高度变化时内部会维持视口稳定，无需手动 scrollTop 补偿（否则会滑过头） */
+  useEffect(() => {
+    const pending = pendingRecallCompensationRef.current;
+    if (!pending) return;
+    const msg = messages.find((m) => m.id === pending.messageId);
+    if (!msg || !(msg.metadata as { recalled?: boolean })?.recalled) return;
+    pendingRecallCompensationRef.current = null;
+  }, [messages]);
   const flushReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false); // 是否显示「回到底部」按钮
   const isAtBottomRef = useRef(true); // 是否在底部，供外部逻辑判断
@@ -127,6 +146,18 @@ export const MessageList: React.FC = () => {
   const atTopStateChange = useCallback((atTop: boolean) => {
     if (atTop && hasMoreHistory) loadMoreHistory();
   }, [hasMoreHistory, loadMoreHistory]);
+
+  /** 自己撤回时带上撤回前高度，供滚动补偿 */
+  const handleRecall = useCallback(
+    (message: Message, previousHeight?: number) => {
+      if (previousHeight != null) {
+        recallWithCompensation(message.id, previousHeight);
+      } else {
+        recallMessage(message.id);
+      }
+    },
+    [recallMessage, recallWithCompensation]
+  );
 
   /**
    * 关键 API 1/2：followOutput(isAtBottom)
@@ -223,17 +254,17 @@ export const MessageList: React.FC = () => {
           showName={showAvatar}
           onVisible={onMessageVisible}
           onEdit={(m, content) => editMessage(m.id, content)}
-          onRecall={(m) => recallMessage(m.id)}
+          onRecall={handleRecall}
         />
       );
     },
-    [showAvatarMap, onMessageVisible, editMessage, recallMessage]
+    [showAvatarMap, onMessageVisible, editMessage, handleRecall]
   );
 
   /** 初始顶部可见索引：进入会话时从底部（最新消息）开始 */
   const initialTopMostItemIndex = Math.max(0, messages.length - 1);
 
-  /** 自定义 List 容器 + Footer（打字指示器） */
+  /** 自定义 List 容器 + Footer + Scroller（拿滚动容器 ref 做撤回补偿） */
   const components = useMemo(
     () => ({
       List: React.forwardRef<HTMLDivElement, { children?: React.ReactNode; style?: React.CSSProperties }>(
@@ -249,6 +280,20 @@ export const MessageList: React.FC = () => {
         <div className="message-list-footer">
           <TypingIndicator />
         </div>
+      ),
+      Scroller: React.forwardRef<HTMLDivElement, { style?: React.CSSProperties; children?: React.ReactNode }>(
+        function Scroller({ style, children, ...rest }, ref) {
+          const setRef = (el: HTMLDivElement | null) => {
+            scrollContainerRef.current = el;
+            if (typeof ref === 'function') ref(el);
+            else if (ref) (ref as React.MutableRefObject<HTMLDivElement | null>).current = el;
+          };
+          return (
+            <div ref={setRef} style={style} {...rest}>
+              {children}
+            </div>
+          );
+        }
       ),
     }),
     []

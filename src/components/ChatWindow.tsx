@@ -16,7 +16,7 @@ import { Toast } from '@/components/Toast';
 
 export const ChatWindow: React.FC = () => {
   // useShallow：浅比较，仅 isOpen/isMinimized/messages/auth 变化时更新（开关、折叠、未读数、登录态）
-  const { isOpen, isMinimized, isExpanded, initialize, messages, auth, simulateIncomingMessages, client } = useChatStore(
+  const { isOpen, isMinimized, isExpanded, initialize, messages, auth, simulateIncomingMessages, client, simulateOtherRecallMessage, showToast } = useChatStore(
     useShallow((s) => ({
       isOpen: s.isOpen,
       isMinimized: s.isMinimized,
@@ -26,6 +26,8 @@ export const ChatWindow: React.FC = () => {
       auth: s.auth,
       simulateIncomingMessages: s.simulateIncomingMessages,
       client: s.client,
+      simulateOtherRecallMessage: s.simulateOtherRecallMessage,
+      showToast: s.showToast,
     }))
   );
   const [simulateCount, setSimulateCount] = useState(10);
@@ -64,6 +66,24 @@ export const ChatWindow: React.FC = () => {
     simulateIncomingMessages(n);
   };
 
+  /** 模拟对方撤回第一条图片消息（带滚动补偿），用于验证是否跳动 */
+  const handleSimulateOtherRecallImage = () => {
+    const item = document.querySelector('.message-item img')?.closest('.message-item') as HTMLElement | null;
+    if (!item) {
+      showToast?.('当前没有图片消息，请先点「模拟对方连发」或让对方发图片');
+      return;
+    }
+    const messageId = item.getAttribute('data-message-id');
+    if (!messageId) return;
+    const msg = messages.find((m) => m.id === messageId);
+    if (!msg || msg.senderId === auth?.userId) {
+      showToast?.('请选择对方发送的图片（第一条图片多为对方发的）');
+      return;
+    }
+    const height = item.getBoundingClientRect().height;
+    simulateOtherRecallMessage(messageId, height);
+  };
+
   return (
     <div className={`chat-window${isExpanded ? ' expanded' : ''}`}>
       <Header />
@@ -82,6 +102,9 @@ export const ChatWindow: React.FC = () => {
           <span className="chat-window-simulate-label">条</span>
           <button type="button" onClick={handleSimulateSend} className="chat-window-simulate-btn">
             模拟对方连发
+          </button>
+          <button type="button" onClick={handleSimulateOtherRecallImage} className="chat-window-simulate-btn" title="撤回列表中第一条对方发的图片，观察是否跳动">
+            模拟对方撤回图片
           </button>
         </div>
       )}

@@ -28,7 +28,8 @@ interface MessageItemProps {
   currentUserId?: string;                     // 当前用户 ID，用于 C2C 判断「是否自己」
   hideEditRecall?: boolean;                   // 隐藏编辑/撤回按钮
   onEdit?: (message: Message, newContent: string) => void;  // 编辑回调
-  onRecall?: (message: Message) => void;      // 撤回回调
+  /** 撤回回调；可选传入撤回前高度 previousHeight，供列表做滚动补偿 */
+  onRecall?: (message: Message, previousHeight?: number) => void;
   /** 回复/引用回调，不传则用 chatStore.replyToMessage（客服 IM） */
   onReply?: (message: Message) => void;
   /** 表情反应：传入则用自定义实现（如 chatSessionStore），否则用 chatStore */
@@ -164,7 +165,8 @@ export const MessageItem = React.memo<MessageItemProps>(function MessageItem({
   };
   const handleRecallConfirm = () => {
     setShowRecallConfirm(false);
-    onRecall?.(message);
+    const previousHeight = rootRef.current ? rootRef.current.getBoundingClientRect().height : undefined;
+    onRecall?.(message, previousHeight);
   };
 
   /** 根据消息类型渲染内容：撤回提示/编辑框/图片/贴纸/语音/视频/文本 */
@@ -270,7 +272,8 @@ export const MessageItem = React.memo<MessageItemProps>(function MessageItem({
   return (
     <>
     <div
-      ref={rootRef}  // 挂载 IntersectionObserver 监听的 DOM
+      ref={rootRef}
+      data-message-id={message.id}
       className={classNames(
         'message-item',
         isUser ? 'message-user' : 'message-other',  // 左右布局

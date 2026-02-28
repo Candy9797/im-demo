@@ -192,6 +192,10 @@ interface ChatState {
   clearSearch: () => void;
   editMessage: (messageId: string, newContent: string) => void;
   recallMessage: (messageId: string) => void;
+  /** 带撤回前高度的撤回（供 MessageItem/滚动补偿用）；先通知列表再 recallMessage */
+  recallWithCompensation: (messageId: string, previousHeight: number) => void;
+  /** 模拟对方撤回某条消息（仅更新 store，用于验证撤回后是否跳动） */
+  simulateOtherRecallMessage: (messageId: string, previousHeight: number) => void;
   showToast: (msg: string) => void;
   clearToast: () => void;
   setFormat: (format: SerializeFormat) => void;
@@ -207,6 +211,12 @@ interface ChatState {
 let chatScrollToBottomCallback: (() => void) | null = null;
 export function registerChatScrollToBottom(fn: (() => void) | null): void {
   chatScrollToBottomCallback = fn;
+}
+
+/** MessageList 注册「撤回前高度」，用于撤回/模拟对方撤回时做滚动补偿 */
+let recallWithCompensationCallback: ((messageId: string, previousHeight: number) => void) | null = null;
+export function registerRecallWithCompensation(fn: ((messageId: string, previousHeight: number) => void) | null): void {
+  recallWithCompensationCallback = fn;
 }
 
 export const useChatStore = create<ChatState>()(
@@ -851,6 +861,25 @@ export const useChatStore = create<ChatState>()(
       client?.recallMessage(messageId);
     },
 
+    recallWithCompensation: (messageId: string, previousHeight: number) => {
+      recallWithCompensationCallback?.(messageId, previousHeight);
+      get().recallMessage(messageId);
+    },
+
+    simulateOtherRecallMessage: (messageId: string, previousHeight: number) => {
+      recallWithCompensationCallback?.(messageId, previousHeight);
+      set((state) => {
+        const m = state.messages.find((x) => x.id === messageId);
+        if (m) {
+          m.content = "已撤回";
+          m.type = MessageType.TEXT;
+          const meta = (m.metadata as Record<string, unknown>) ?? {};
+          meta.recalled = true;
+          m.metadata = meta;
+        }
+      });
+    },
+
     showToast: (msg: string) => set({ toast: msg }),
     clearToast: () => set({ toast: null }),
 
@@ -859,7 +888,7 @@ export const useChatStore = create<ChatState>()(
       client?.requestSimulatePush(count);
     },
 
-    /** 本地模拟对方一次性发送 N 条消息（不经过 WS），用于智能会话页压测/演示 */
+    /** 本地模拟对方一次性发送 N 条消息（不经过 WS），用于压测/演示；第一条为图片便于测试「模拟对方撤回图片」 */
     simulateIncomingMessages: (count: number) => {
       const { conversationId, phase, messages } = get();
       if (!conversationId || count < 1) return;
@@ -871,11 +900,14 @@ export const useChatStore = create<ChatState>()(
       const baseTime = Date.now();
       const newMessages: Message[] = [];
       for (let i = 0; i < count; i++) {
+        const isFirst = i === 0;
         newMessages.push({
           id: `sim-${baseTime}-${i}-${Math.random().toString(36).slice(2, 9)}`,
           conversationId,
-          content: `模拟消息 ${i + 1}`,
-          type: MessageType.TEXT,
+          content: isFirst
+            ? "https://picsum.photos/320/240"
+            : `模拟消息 ${i + 1}`,
+          type: isFirst ? MessageType.IMAGE : MessageType.TEXT,
           status: MessageStatus.READ,
           senderType,
           senderId,

@@ -20,14 +20,17 @@ export async function GET() {
   } catch (e) {
     clearTimeout(timeout);
     console.error("[api/auth/demo]", e);
-    const isTimeout = e instanceof Error && e.name === "AbortError";
-    return Response.json(
-      {
-        error: isTimeout
-          ? "连接超时，请确认 IM 后端 (3001) 已启动"
-          : "IM 后端未启动。请执行 npm run dev（同时启动前端 3000 + 后端 3001）",
-      },
-      { status: 502 }
-    );
+    const err = e instanceof Error ? e : new Error(String(e));
+    const isTimeout = err.name === "AbortError";
+    const isRefused =
+      "cause" in err &&
+      err.cause instanceof Error &&
+      (err.cause as NodeJS.ErrnoException).code === "ECONNREFUSED";
+    const message = isTimeout
+      ? "连接超时，请确认 IM 后端 (3001) 已启动"
+      : isRefused
+        ? "IM 后端 (127.0.0.1:3001) 未启动，请执行 pnpm run dev 同时启动前后端"
+        : "IM 后端未启动。请执行 pnpm run dev（同时启动前端 3000 + 后端 3001）";
+    return Response.json({ error: message }, { status: 502 });
   }
 }
