@@ -170,6 +170,8 @@ interface ChatState {
   toggleMinimize: () => void;
   toggleExpand: () => void; // 放大/缩小
   toggleOpen: () => void;
+  /** 客户端挂载后从 sessionStorage 恢复 isOpen/isMinimized，避免 hydration 与 SSR 不一致 */
+  rehydrateChatWindowState: () => void;
   destroy: () => void;
   loadMoreHistory: () => void;
   markAsRead: (messageIds: string[]) => void;
@@ -208,7 +210,9 @@ export const useChatStore = create<ChatState>()(
       faqItems: DEFAULT_FAQ_ITEMS,
       typing: { isTyping: false, senderType: null },
       queue: null,
-      ...getChatWindowStateFromStorage(),
+      // 初始固定为关闭，避免 SSR 与客户端 hydration 不一致（sessionStorage 仅客户端有）
+      isOpen: false,
+      isMinimized: false,
       isExpanded: false,
       showWalletModal: false,
       wantFreshStart: false,
@@ -655,6 +659,10 @@ export const useChatStore = create<ChatState>()(
           state.isOpen = !state.isOpen;
           saveChatWindowStateToStorage(state.isOpen, state.isMinimized);
         }),
+      rehydrateChatWindowState: () => {
+        const { isOpen, isMinimized } = getChatWindowStateFromStorage();
+        set({ isOpen, isMinimized });
+      },
 
       /** 滚动到顶部时拉取更早历史：取当前最小 seq，发 load_history */
       loadMoreHistory: () => {

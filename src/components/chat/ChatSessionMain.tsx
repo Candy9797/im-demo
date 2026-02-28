@@ -18,12 +18,14 @@ import type { Message } from '@/sdk';
 
 export const ChatSessionMain: React.FC = () => {
   // useShallow：浅比较，仅 activeConversation/messagesByConv/typingByGroup/groups 变化时更新（切换会话、新消息、输入态）
-  const { activeConversation, messagesByConv, typingByGroup, groups, editMessage, recallMessage, replyToMessage, addReaction, removeReaction, rehydrateActiveConversation } = useChatSessionStore(
+  const { activeConversation, messagesByConv, typingByGroup, typingByUser, groups, friends, editMessage, recallMessage, replyToMessage, addReaction, removeReaction, rehydrateActiveConversation } = useChatSessionStore(
     useShallow((s) => ({
       activeConversation: s.activeConversation,
       messagesByConv: s.messagesByConv,
       typingByGroup: s.typingByGroup,
+      typingByUser: s.typingByUser,
       groups: s.groups,
+      friends: s.friends,
       editMessage: s.editMessage,
       recallMessage: s.recallMessage,
       replyToMessage: s.replyToMessage,
@@ -50,9 +52,26 @@ export const ChatSessionMain: React.FC = () => {
     const raw = messagesByConv[conversationKey] ?? [];
     return [...raw].sort((a, b) => (a.seqId ?? a.timestamp) - (b.seqId ?? b.timestamp));
   }, [activeConversation, conversationKey, messagesByConv]);
-  const typingUserIds = activeConversation?.type === 'group'
-    ? (typingByGroup[activeConversation.id] ?? [])
-    : [];
+  // 单聊：对方正在输入用 typingByUser[friendId]；群聊：typingByGroup[groupId] 为正在输入的成员 id 列表
+  const typingUserIds = useMemo(() => {
+    if (!activeConversation) return [];
+    if (activeConversation.type === 'group') return typingByGroup[activeConversation.id] ?? [];
+    return typingByUser[activeConversation.id] ? [activeConversation.id] : [];
+  }, [activeConversation, typingByGroup, typingByUser]);
+
+  // 展示文案：单聊显示对方昵称，群聊显示「N 人正在输入」或名单
+  const typingLabel = useMemo(() => {
+    if (typingUserIds.length === 0) return '';
+    if (activeConversation?.type === 'c2c') return `${activeConversation.name} 正在输入`;
+    if (typingUserIds.length === 1) {
+      const name = friends.find((f) => f.id === typingUserIds[0])?.name ?? '有人';
+      return `${name} 正在输入`;
+    }
+    const names = typingUserIds
+      .map((id) => friends.find((f) => f.id === id)?.name)
+      .filter(Boolean);
+    return names.length > 0 ? `${names.join('、')} 正在输入` : `${typingUserIds.length} 人正在输入`;
+  }, [activeConversation, typingUserIds, friends]);
 
   // 切换会话时保持每个会话的滚动位置：按会话 key 存「顶部可见条目的 index」
   const scrollTopIndexByKeyRef = useRef<Record<string, number>>({});
@@ -124,14 +143,14 @@ export const ChatSessionMain: React.FC = () => {
           overscan={10}
           className="chat-session-virtuoso"
         />
-        {typingUserIds.length > 0 && (
+        {typingUserIds.length > 0 && typingLabel && (
           <div className="chat-session-typing">
             <div className="typing-dots">
               <span className="dot" />
               <span className="dot" />
               <span className="dot" />
             </div>
-            <span>正在输入...</span>
+            <span>{typingLabel}...</span>
           </div>
         )}
       </div>

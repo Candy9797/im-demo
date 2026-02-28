@@ -28,8 +28,10 @@ import {
   ACCEPTED_VIDEO_TYPES,
   MAX_FILE_SIZE,
 } from '@/utils/constants';
+import { CURRENT_USER_ID } from '@/lib/chatSessionMock';
 
 const DRAFT_DEBOUNCE_MS = 500;
+const TYPING_DEBOUNCE_MS = 2000; // 停止输入后多久清除「正在输入」
 
 export const ChatSessionInput: React.FC = () => {
   // ---------- Store ----------
@@ -37,7 +39,7 @@ export const ChatSessionInput: React.FC = () => {
   // 引用相同（例如切到同一个会话，或 store 没变）：不会重渲染。
   // 引用不同（例如切换会话，store 换了一个新对象）：会触发重渲染。
   // useShallow 检测到引用变化，组件就会重渲染。
-  const { activeConversation, sendMessage, sendImage, sendVideo, sendSticker, sendTradeCard, scrollToInputRequest } =
+  const { activeConversation, sendMessage, sendImage, sendVideo, sendSticker, sendTradeCard, scrollToInputRequest, setTyping } =
     useChatSessionStore(
       useShallow((s) => ({
         activeConversation: s.activeConversation,
@@ -47,12 +49,14 @@ export const ChatSessionInput: React.FC = () => {
         sendSticker: s.sendSticker,
         sendTradeCard: s.sendTradeCard,
         scrollToInputRequest: s.scrollToInputRequest,
+        setTyping: s.setTyping,
       }))
     );
 
   const lastScrollRequestRef = useRef(0);
   const inputTextRef = useRef('');
   const prevDraftIdRef = useRef<string | null>(null);
+  const typingStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const draftId = activeConversation ? `chat:${activeConversation.id}` : null;
 
@@ -106,10 +110,41 @@ export const ChatSessionInput: React.FC = () => {
     }
   }, [scrollToInputRequest]);
 
+  // 正在输入：输入时上报，防抖 2s 后清除（Mock：本方输入时模拟对方/群内「正在输入」）
+  const reportTyping = useCallback(
+    (isTyping: boolean) => {
+      if (!activeConversation) return;
+      if (activeConversation.type === 'c2c') {
+        setTyping(activeConversation.id, isTyping);
+      } else {
+        setTyping(CURRENT_USER_ID, isTyping, activeConversation.id);
+      }
+    },
+    [activeConversation, setTyping]
+  );
+
+  const scheduleTypingStop = useCallback(() => {
+    if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
+    typingStopTimerRef.current = setTimeout(() => {
+      typingStopTimerRef.current = null;
+      reportTyping(false);
+    }, TYPING_DEBOUNCE_MS);
+  }, [reportTyping]);
+
   // ---------- 草稿：与 ref 同步 ----------
   useEffect(() => {
     inputTextRef.current = inputText;
   }, [inputText]);
+
+  // 切换会话或卸载时清除「正在输入」定时器，避免在错误会话上清除
+  useEffect(() => {
+    return () => {
+      if (typingStopTimerRef.current) {
+        clearTimeout(typingStopTimerRef.current);
+        typingStopTimerRef.current = null;
+      }
+    };
+  }, [draftId]);
 
   // ---------- 草稿：切换会话时保存旧会话、加载新会话草稿 ----------
   useEffect(() => {
@@ -142,13 +177,18 @@ export const ChatSessionInput: React.FC = () => {
   // ---------- 交互 ----------
   const handleSend = useCallback(() => {
     if (!inputText.trim()) return;
+    if (typingStopTimerRef.current) {
+      clearTimeout(typingStopTimerRef.current);
+      typingStopTimerRef.current = null;
+    }
+    reportTyping(false);
     sendMessage(inputText.trim());
     setInputText('');
     setShowEmoji(false);
     setRestoredFromDraft(false);
     if (draftId) clearDraft(draftId);
     inputRef.current?.focus();
-  }, [inputText, sendMessage, draftId]);
+  }, [inputText, sendMessage, draftId, reportTyping]);
 
   // Enter 发送，Shift+Enter 换行（不阻止默认即换行）
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -355,7 +395,11 @@ export const ChatSessionInput: React.FC = () => {
           ref={inputRef}
           className="chat-input chat-session-input"
           value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
+          onChange={(e) => {
+            setInputText(e.target.value);
+            reportTyping(true);
+            scheduleTypingStop();
+          }}
           onKeyDown={handleKeyDown}
           placeholder="输入消息，或按住右侧麦克风说话..."
           rows={1}
@@ -364,6 +408,8 @@ export const ChatSessionInput: React.FC = () => {
           lang="zh-CN"
           onResult={(text) => {
             setInputText((prev) => (prev ? prev + text : text));
+            reportTyping(true);
+            scheduleTypingStop();
             setTimeout(() => inputRef.current?.focus(), 50);
           }}
           onInterim={setVoiceInterim}
