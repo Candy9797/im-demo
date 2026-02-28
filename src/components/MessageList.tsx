@@ -62,8 +62,8 @@ const OVERSCAN = 5;
 const MARK_READ_DEBOUNCE_MS = 200;
 /** 已读批量上报：单次最大条数，达到即立即上报 */
 const MARK_READ_BATCH_SIZE = 20;
-/** 撤回后「已撤回」单行预估高度（px），用于滚动补偿 */
-/** 撤回后单条预估高度（含气泡、时间等），偏小会补偿过头导致滑得太后上面 */
+/** 撤回后单条预估高度（px，含「已撤回」气泡等），用于滚动补偿；偏小会补偿过头 */
+const ESTIMATED_RECALLED_ITEM_HEIGHT = 56;
 export const MessageList: React.FC = () => {
   // useShallow 浅比较：仅 messages/hasMoreHistory/scrollToInputRequest 等选中字段变化时重渲染
   // scrollToInputRequest：时间戳信号，replyToMessage 时更新，MessageList 滚底、InputArea 聚焦；用 ref 去重避免重复滚动
@@ -107,13 +107,25 @@ export const MessageList: React.FC = () => {
     };
   }, []);
 
-  /** 撤回后仅清空 pending。Virtuoso 在 item 高度变化时内部会维持视口稳定，无需手动 scrollTop 补偿（否则会滑过头） */
+  /** 撤回（自己或对方）导致高度变小时，做 scrollTop 补偿，避免列表跳动 */
   useEffect(() => {
     const pending = pendingRecallCompensationRef.current;
     if (!pending) return;
     const msg = messages.find((m) => m.id === pending.messageId);
     if (!msg || !(msg.metadata as { recalled?: boolean })?.recalled) return;
-    pendingRecallCompensationRef.current = null;
+    const run = () => {
+      const el = scrollContainerRef.current;
+      if (!el) {
+        pendingRecallCompensationRef.current = null;
+        return;
+      }
+      const delta = pending.oldHeight - ESTIMATED_RECALLED_ITEM_HEIGHT;
+      if (delta > 0) {
+        el.scrollTop = Math.max(0, el.scrollTop - delta);
+      }
+      pendingRecallCompensationRef.current = null;
+    };
+    requestAnimationFrame(() => requestAnimationFrame(run));
   }, [messages]);
   const flushReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false); // 是否显示「回到底部」按钮
