@@ -2856,15 +2856,19 @@ html, body {
   inset: 0;
   display: flex;
   flex-direction: column;
+  background: var(--bg-primary);
 }
 
 .history-message-virtuoso {
   height: 100%;
   padding: 16px 0;
+  background: var(--bg-primary);
 }
 
-.history-message-list .message-list-inner {
+.history-message-list .message-list-inner,
+.history-message-list .history-list-inner {
   padding: 0;
+  background: var(--bg-primary);
 }
 
 .history-message-list .scroll-to-bottom-btn {

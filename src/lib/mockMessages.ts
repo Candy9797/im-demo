@@ -52,7 +52,11 @@ const SENDER_NAMES: Record<string, string> = {
   [SenderType.SYSTEM]: 'System',
 };
 
-export function generateMockMessages(count: number): Message[] {
+/**
+ * @param count 生成条数
+ * @param startSeqId 起始 seqId，用于追加时接续已有列表（默认 1）
+ */
+export function generateMockMessages(count: number, startSeqId = 1): Message[] {
   const messages: Message[] = [];
   const convId = 'conv-history-mock';
   const baseTime = Date.now() - count * 60000;
@@ -60,7 +64,7 @@ export function generateMockMessages(count: number): Message[] {
   const senders = [SenderType.USER, SenderType.BOT, SenderType.AGENT] as const;
 
   for (let i = 0; i < count; i++) {
-    const seqId = i + 1;
+    const seqId = startSeqId + i;
     const sender = senders[i % senders.length];
     const type = i % 20 === 0 && i > 0 ? MessageType.SYSTEM : types[i % types.length];
     const isSystem = type === MessageType.SYSTEM;

@@ -2,16 +2,20 @@
  * MessageQueue - 高频消息队列（批处理、去重、重试）
  *
  * 场景：群聊、行情推送等每秒数十条消息
- * 能力：入站批处理减少 setState；出站批处理降低帧数；5s 窗口去重；发送失败指数退避重试
+ * 能力：入站批处理减少 setState；出站批处理降低帧数；5s 窗口去重；发送失败/ACK 超时自动重试
  * 模式：生产者-消费者，flushInterval 定时 flush
+ *
+ * --- 何时会重发（同一条消息可能被再次发送）---
+ * 1. 发送失败：flushOutgoing 里 onFlushOutgoing（如 ws.send）抛错时，消息 unshift 回 outgoing，
+ *    下次 flush 会自动再发；最多重试 retryAttempts 次，超过则 markSendFailed。
+ * 2. ACK 超时：消息发成功后进入 pendingAck 并设 ackTimeoutMs 定时器；超时未收到服务端 message_ack，
+ *    则 handleAckTimeout 把该消息移回 outgoing 队头，下次 flush 自动再发；同样受 retryAttempts 限制。
+ * 3. 断线回滚：DISCONNECTED 时 IMClient 调 rollbackPendingAck，把 pendingAck 里未确认消息全部移回 outgoing，
+ *    重连后 resume 恢复定时 flush，这些消息会在后续 flush 中自动重发（仍受 retryAttempts 限制）。
  *
  * 待确认队列（Pending-Ack）：send 后消息移入 pendingAck，ACK 到达才移除；
  * 断线时 rollbackPendingAck 将未确认消息回滚到 outgoing，重连后重发。
- * 批处理	定时 flush 每批处理，降低 ws 帧数和 setState 次数
-pendingAck	已发出但未 ACK 的消息，断线时回滚，重连后重发
-ACK 超时	超时未 ACK 则重发，重试次数用尽则标记失败
-入站去重	seenIds 在时间窗口内去重，避免重复消息
-先入后出	flush 时先处理入站再处理出站，优先展示收到的新消息
+ * 入站去重：seenIds 在时间窗口内去重，避免重复展示。先入后出：flush 时先处理入站再出站。
  */
 
 import { type Message, MessageStatus } from "./types";
@@ -35,6 +39,7 @@ const DEFAULT_CONFIG: QueueConfig = {
   retryAttempts: 3,
   retryDelay: 1000,
   deduplicationWindow: 5000,
+  // 消息发出去后如果 10 秒内没收到服务端的 message_ack，就会触发 handleAckTimeout，按重试次数回队重发或标记失败
   ackTimeoutMs: 10000, // 10s
 };
 
@@ -72,7 +77,7 @@ export class MessageQueue {
   start(
     onFlushOutgoing: (messages: Message[]) => Promise<void>,
     onFlushIncoming: (messages: Message[]) => void,
-    onMessageSendFailed?: (message: Message) => void
+    onMessageSendFailed?: (message: Message) => void,
   ): void {
     this.onFlushOutgoing = onFlushOutgoing;
     this.onFlushIncoming = onFlushIncoming;
@@ -129,7 +134,7 @@ export class MessageQueue {
     if (this.outgoing.length >= this.config.maxSize) {
       // Drop oldest non-sending message
       const dropIndex = this.outgoing.findIndex(
-        (p) => p.message.status !== MessageStatus.SENDING
+        (p) => p.message.status !== MessageStatus.SENDING,
       );
       if (dropIndex !== -1) {
         this.outgoing.splice(dropIndex, 1);
@@ -184,8 +189,11 @@ export class MessageQueue {
 
   /**
    * Flush outgoing messages to the send handler.
-   * 发送成功后移入 pendingAck，等 ACK 到达后由 onAck 移除；
-   * 断线时 rollbackPendingAck 将未确认消息回滚到 outgoing 重发。
+   * 发送成功后移入 pendingAck，等 ACK 到达后由 onAck 移除；断线时 rollbackPendingAck 回滚重发。
+   *
+   * 会触发重发的两种情况（均为自动，无需业务调用）：
+   * - onFlushOutgoing 抛错：本批消息 unshift 回 outgoing，下次 flush 再发（attempts 超限则 markSendFailed）。
+   * - 本批发成功后：每条在 pendingAck 中挂 ackTimeoutMs 定时器，超时未 onAck 则 handleAckTimeout 回队重发。
    */
   private async flushOutgoing(): Promise<void> {
     if (this.outgoing.length === 0 || !this.onFlushOutgoing) return;
@@ -204,7 +212,7 @@ export class MessageQueue {
         this.pendingAck.set(clientMsgId, pending);
         const timer = setTimeout(
           () => this.handleAckTimeout(clientMsgId),
-          this.config.ackTimeoutMs
+          this.config.ackTimeoutMs,
         );
         this.ackTimers.set(clientMsgId, timer);
       }
@@ -230,7 +238,10 @@ export class MessageQueue {
     this.pendingAck.delete(clientMsgId);
   }
 
-  /** ACK 超时：未收到 ACK，回队重发或标记失败 */
+  /**
+   * ACK 超时：发成功后 ackTimeoutMs 内未收到服务端 message_ack，视为可能丢包，回队重发或标记失败。
+   * attempts < retryAttempts 则 unshift 回 outgoing（下次 flush 自动再发），否则 markSendFailed。
+   */
   private handleAckTimeout(clientMsgId: string): void {
     this.ackTimers.delete(clientMsgId);
     const pending = this.pendingAck.get(clientMsgId);
@@ -244,7 +255,9 @@ export class MessageQueue {
   }
 
   /**
-   * 断线时调用：将 pendingAck 中未确认消息回滚到 outgoing，重连后重发
+   * 断线时调用（由 IMClient 在 DISCONNECTED 时调用）：将 pendingAck 中「已发出但未收到 ACK」的消息
+   * 全部移回 outgoing 队头，并清除 ACK 超时定时器。重连后 resume 恢复 flush，这些消息会在后续
+   * flush 中自动重发（仍受 retryAttempts 限制，超限则 markSendFailed）。
    */
   rollbackPendingAck(): void {
     for (const [clientMsgId, pending] of this.pendingAck) {
@@ -265,7 +278,7 @@ export class MessageQueue {
   /** 标记消息发送失败，并回调 onMessageSendFailed */
   private markSendFailed(pending: PendingMessage): void {
     console.error(
-      `[MessageQueue] Message ${pending.message.id} failed after ${this.config.retryAttempts} attempts`
+      `[MessageQueue] Message ${pending.message.id} failed after ${this.config.retryAttempts} attempts`,
     );
     pending.message.status = MessageStatus.FAILED;
     this.onMessageSendFailed?.(pending.message);

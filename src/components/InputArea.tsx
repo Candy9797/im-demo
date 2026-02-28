@@ -29,8 +29,10 @@ import { EmojiPicker } from '@/components/EmojiPicker';
 import { StickerPicker } from '@/components/StickerPicker';
 import { QuotePreview } from '@/components/QuotePreview';
 import { HoldToTalkButton } from '@/components/HoldToTalkButton';
+import { TradeCardShareModal } from '@/components/TradeCardShareModal';
 import { getDraft, setDraft, clearDraft } from '@/lib/draftStorage';
 import { ACCEPTED_FILE_TYPES, MAX_FILE_SIZE } from '@/utils/constants';
+import { ConnectionState } from '@/sdk';
 
 const DRAFT_DEBOUNCE_MS = 500;
 const DRAFT_ID_CUSTOMER_SERVICE = 'customer-service';
@@ -38,11 +40,12 @@ const DRAFT_ID_CUSTOMER_SERVICE = 'customer-service';
 export const InputArea: React.FC = () => {
   // ---------- Store ----------
   // useShallow：仅 connectionState/scrollToInputRequest 变化时重渲染
-  const { sendMessage, sendFile, sendSticker, connectionState, scrollToInputRequest } = useChatStore(
+  const { sendMessage, sendFile, sendSticker, sendTradeCard, connectionState, scrollToInputRequest } = useChatStore(
     useShallow((s) => ({
       sendMessage: s.sendMessage,
       sendFile: s.sendFile,
       sendSticker: s.sendSticker,
+      sendTradeCard: s.sendTradeCard,
       connectionState: s.connectionState,
       scrollToInputRequest: s.scrollToInputRequest,
     }))
@@ -56,11 +59,12 @@ export const InputArea: React.FC = () => {
   const [restoredFromDraft, setRestoredFromDraft] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
   const [showSticker, setShowSticker] = useState(false);
+  const [showTradeShare, setShowTradeShare] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
   const [pickerPosition, setPickerPosition] = useState({ top: 0, left: 0 });
-  const isConnected = connectionState === 'connected';
+  const isConnected = connectionState === ConnectionState.CONNECTED;
 
   // ---------- Picker 定位 ----------
   const updatePickerPosition = useCallback(() => {
@@ -118,14 +122,23 @@ export const InputArea: React.FC = () => {
 
   // ---------- 交互 ----------
   const handleSend = useCallback(() => {
-    if (!text.trim() || !isConnected) return;
+    if (!text.trim()) return;
+    // if (!isConnected) {
+    //   const msg =
+    //     connectionState === ConnectionState.CONNECTING ||
+    //     connectionState === ConnectionState.RECONNECTING
+    //       ? '连接中，请稍候'
+    //       : '连接断开，请稍后再试';
+    //   useChatStore.getState().showToast?.(msg);
+    //   return;
+    // }
     sendMessage(text);
     setText('');
     setShowEmoji(false);
     setRestoredFromDraft(false);
     clearDraft(DRAFT_ID_CUSTOMER_SERVICE);
     inputRef.current?.focus();
-  }, [text, isConnected, sendMessage]);
+  }, [text, isConnected, connectionState, sendMessage]);
 
   // Enter 发送，Shift+Enter 换行
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -249,6 +262,18 @@ export const InputArea: React.FC = () => {
             <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
           </svg>
         </button>
+        <button
+          className="toolbar-btn"
+          onClick={() => { setShowEmoji(false); setShowSticker(false); setShowTradeShare(true); }}
+          title="分享交易卡片"
+          aria-label="分享交易卡片"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="2" y="4" width="20" height="14" rx="2" ry="2" />
+            <path d="M2 10h20" />
+            <path d="M6 14h4" />
+          </svg>
+        </button>
 
         {/* 隐藏的 file input，accept 含 image/*、video/*、application/pdf */}
         <input
@@ -259,6 +284,11 @@ export const InputArea: React.FC = () => {
           style={{ display: 'none' }}
         />
       </div>
+      <TradeCardShareModal
+        open={showTradeShare}
+        onClose={() => setShowTradeShare(false)}
+        onShare={(payload) => { sendTradeCard(payload); setShowTradeShare(false); }}
+      />
 
       {/* 已恢复未发送内容提示 */}
       {restoredFromDraft && (
@@ -284,8 +314,7 @@ export const InputArea: React.FC = () => {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={isConnected ? '输入消息，或按住麦克风说话...' : 'Connecting...'}
-          disabled={!isConnected}
+          placeholder="输入消息，或按住麦克风说话..."
           rows={1}
         />
         <HoldToTalkButton
@@ -298,12 +327,11 @@ export const InputArea: React.FC = () => {
           onEnd={() => setVoiceInterim('')}
           holdTitle="按住说话"
           unsupportedTitle="当前浏览器不支持语音输入"
-          disabled={!isConnected}
         />
         <button
           className="send-btn"
           onClick={handleSend}
-          disabled={!text.trim() || !isConnected}
+          disabled={!text.trim()}
           aria-label="Send message"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

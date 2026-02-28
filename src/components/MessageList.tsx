@@ -50,7 +50,7 @@
 import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { useShallow } from 'zustand/react/shallow';
-import { useChatStore } from '@/store/chatStore';
+import { useChatStore, registerChatScrollToBottom } from '@/store/chatStore';
 import { MessageItem } from '@/components/MessageItem';
 import { TypingIndicator } from '@/components/TypingIndicator';
 import type { Message } from '@/sdk';
@@ -83,6 +83,19 @@ export const MessageList: React.FC = () => {
   const lastScrollRequestRef = useRef(0); // 已处理的 scrollToInputRequest，避免重复滚动
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const pendingReadRef = useRef<Set<string>>(new Set());
+
+  /** 向 store 注册滚底回调：发消息后 store 直接调用，不依赖 effect，确保能滚到底部 */
+  useEffect(() => {
+    registerChatScrollToBottom(() => {
+      const n = useChatStore.getState().messages.length;
+      if (n > 0) {
+        virtuosoRef.current?.scrollToIndex({ index: n - 1, behavior: 'smooth' });
+      }
+      isAtBottomRef.current = true;
+      setShowScrollBtn(false);
+    });
+    return () => registerChatScrollToBottom(null);
+  }, []);
   const flushReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false); // 是否显示「回到底部」按钮
   const isAtBottomRef = useRef(true); // 是否在底部，供外部逻辑判断
@@ -184,15 +197,18 @@ export const MessageList: React.FC = () => {
   flushRef.current = flushMarkAsRead;
   useEffect(() => () => flushRef.current(), []);
 
-  /** 响应 scrollToInputRequest：replyToMessage 等触发时 store 更新时间戳，此处滚到底部，ref 记录已处理避免重复 */
+  /** 响应 scrollToInputRequest：发消息 / 引用回复等触发时 store 更新时间戳，此处滚到底部；setTimeout(0) 延后到下一任务，确保 Virtuoso 已用新 messages 渲染（不 cleanup 取消，避免 Strict Mode 下被清掉导致不滚底） */
   useEffect(() => {
-    if (scrollToInputRequest && scrollToInputRequest !== lastScrollRequestRef.current) {
-      lastScrollRequestRef.current = scrollToInputRequest;
+    if (!scrollToInputRequest || scrollToInputRequest === lastScrollRequestRef.current) return;
+    lastScrollRequestRef.current = scrollToInputRequest;
+    const lastIndex = messages.length - 1;
+    if (lastIndex < 0) return;
+    setTimeout(() => {
       virtuosoRef.current?.scrollToIndex({
-        index: messages.length - 1,
+        index: lastIndex,
         behavior: 'smooth',
       });
-    }
+    }, 0);
   }, [scrollToInputRequest, messages.length]);
 
   /** Virtuoso 单条渲染：根据 showAvatarMap 控制头像/昵称，并注入 onVisible/onEdit/onRecall */

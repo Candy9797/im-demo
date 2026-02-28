@@ -56,22 +56,22 @@ export default function HistoryPage() {
   const [renderTime, setRenderTime] = useState<number | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
 
+  /** 每次点击预设数量：追加 n 条到现有列表，不清空 */
   const loadMessages = useCallback((n: number) => {
     setIsGenerating(true);
     const start = performance.now();
-    const msgs = generateMockMessages(n);
-    setCount(n);
-    setMessages(msgs);
+    setMessages((prev) => {
+      const startSeqId = prev.length + 1;
+      const appended = generateMockMessages(n, startSeqId);
+      return [...prev, ...appended];
+    });
+    setCount(n); // 用于高亮当前点击的预设，总条数由 messages.length 显示
     requestAnimationFrame(() => {
       const end = performance.now();
       setRenderTime(Math.round(end - start));
       setIsGenerating(false);
     });
   }, []);
-
-  const handleCountChange = (n: number) => {
-    loadMessages(n);
-  };
 
   const handleSendMessage = useCallback((content: string) => {
     const nextSeq = messages.length + 1;
@@ -107,7 +107,7 @@ export default function HistoryPage() {
             <button
               key={value}
               className={`history-preset-btn ${count === value ? 'active' : ''}`}
-              onClick={() => handleCountChange(value)}
+              onClick={() => loadMessages(value)}
               disabled={isGenerating}
             >
               {label}

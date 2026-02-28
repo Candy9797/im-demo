@@ -16,7 +16,7 @@ import { Toast } from '@/components/Toast';
 
 export const ChatWindow: React.FC = () => {
   // useShallow：浅比较，仅 isOpen/isMinimized/messages/auth 变化时更新（开关、折叠、未读数、登录态）
-  const { isOpen, isMinimized, isExpanded, initialize, messages, auth, simulateIncomingMessages } = useChatStore(
+  const { isOpen, isMinimized, isExpanded, initialize, messages, auth, simulateIncomingMessages, client } = useChatStore(
     useShallow((s) => ({
       isOpen: s.isOpen,
       isMinimized: s.isMinimized,
@@ -25,6 +25,7 @@ export const ChatWindow: React.FC = () => {
       messages: s.messages,
       auth: s.auth,
       simulateIncomingMessages: s.simulateIncomingMessages,
+      client: s.client,
     }))
   );
   const [simulateCount, setSimulateCount] = useState(10);
@@ -33,6 +34,11 @@ export const ChatWindow: React.FC = () => {
   useEffect(() => {
     if (isOpen && !useChatStore.getState().client) initialize();
   }, [isOpen, initialize]);
+
+  // client 就绪后同步连接状态，解决刷新后已连上但 UI 仍显示未连接
+  useEffect(() => {
+    if (isOpen && client) useChatStore.getState().syncConnectionState();
+  }, [isOpen, client]);
 
   if (!isOpen) return null;
 

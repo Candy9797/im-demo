@@ -12,8 +12,8 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { MessageItem } from '@/components/MessageItem';
 import type { Message } from '@/sdk';
 
-/** 性能策略：虚拟化缓冲区 */
-const OVERSCAN = 8;
+/** 虚拟化缓冲区：加大以减少快速滑动时的黑屏/空白 */
+const OVERSCAN = 24;
 
 interface HistoryMessageListProps {
   messages: Message[];
@@ -94,7 +94,7 @@ export const HistoryMessageList: React.FC<HistoryMessageListProps> = ({
     <div className="history-message-list">
       <Virtuoso
         ref={virtuosoRef}
-        style={{ height: '100%' }}
+        style={{ height: '100%', background: 'var(--bg-primary)' }}
         data={messages}
         initialTopMostItemIndex={initialTopMostItemIndex}
         atBottomStateChange={atBottomStateChange}

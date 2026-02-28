@@ -42,6 +42,7 @@ export type {
   Message,
   MessageMetadata,
   QuoteInfo,
+  TradeCardPayload,
   ConnectionConfig,
   SerializeFormat,
   AgentInfo,
