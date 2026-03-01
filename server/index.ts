@@ -14,6 +14,7 @@ import { WebSocketServer } from "ws";
 import { createNonce } from "./db";
 import { verifySiweAndIssueToken } from "./auth";
 import { handleConnection, getRateLimitState, getRateLimitConfig } from "./ws-handler";
+import { handleRoomConnection } from "./ws-room-handler";
 import { upload, getFileUrl } from "./upload";
 
 const PORT = Number(process.env.PORT) || 3001;
@@ -113,6 +114,7 @@ app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: "/ws" });
+const wssRoom = new WebSocketServer({ server, path: "/ws-room" });
 
 /** 从 Sec-WebSocket-Protocol 头解析 JWT（子协议为 im-auth,<token>），避免 URL 泄露；无则回退到 URL query */
 function getTokenFromRequest(req: IncomingMessage): string | null {
@@ -133,6 +135,11 @@ wss.on("connection", (ws, req) => {
   const kickOthers = url.searchParams.get("multi") !== "1";
   const format = (url.searchParams.get("format") === "protobuf" ? "protobuf" : "json") as "json" | "protobuf";
   handleConnection(ws as any, token, fresh, kickOthers, format);
+});
+
+wssRoom.on("connection", (ws, req) => {
+  const token = getTokenFromRequest(req);
+  handleRoomConnection(ws as any, token);
 });
 
 (async () => {

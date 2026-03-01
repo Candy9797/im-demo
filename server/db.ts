@@ -68,6 +68,23 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id);
     CREATE INDEX IF NOT EXISTS idx_conversations_user_type ON conversations(user_id, session_type);
     CREATE INDEX IF NOT EXISTS idx_nonces_expires ON nonces(expires_at);
+    CREATE TABLE IF NOT EXISTS rooms (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS room_messages (
+      id TEXT PRIMARY KEY,
+      room_id TEXT NOT NULL,
+      seq_id INTEGER NOT NULL,
+      sender_id TEXT NOT NULL,
+      sender_name TEXT NOT NULL,
+      content TEXT NOT NULL,
+      msg_type TEXT NOT NULL DEFAULT 'text',
+      timestamp INTEGER NOT NULL,
+      FOREIGN KEY (room_id) REFERENCES rooms(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_room_messages_room_seq ON room_messages(room_id, seq_id);
   `);
 
   try {
@@ -386,6 +403,57 @@ export function deleteMessagesOlderThan(days: number): number {
   getDb().run("DELETE FROM messages WHERE timestamp < ?", [cutoff]);
   const r = getOne(getDb(), "SELECT changes() as c", []) as { c: number };
   return r?.c ?? 0;
+}
+
+// ---------- 多人房间（room） ----------
+export function ensureRoom(roomId: string, name?: string): { id: string; name: string } {
+  const d = getDb();
+  const row = getOne(d, "SELECT id, name FROM rooms WHERE id = ?", [roomId]) as { id: string; name: string } | undefined;
+  if (row) return row;
+  const displayName = name ?? roomId;
+  d.run("INSERT INTO rooms (id, name, created_at) VALUES (?, ?, ?)", [roomId, displayName, Date.now()]);
+  return { id: roomId, name: displayName };
+}
+
+export function getRoom(roomId: string): { id: string; name: string } | undefined {
+  return getOne(getDb(), "SELECT id, name FROM rooms WHERE id = ?", [roomId]) as { id: string; name: string } | undefined;
+}
+
+export function nextRoomSeqId(roomId: string): number {
+  const row = getOne(getDb(), "SELECT MAX(seq_id) as m FROM room_messages WHERE room_id = ?", [roomId]) as { m: number | null };
+  return (row?.m ?? 0) + 1;
+}
+
+export function insertRoomMessage(
+  msgId: string,
+  roomId: string,
+  seqId: number,
+  senderId: string,
+  senderName: string,
+  content: string,
+  msgType = "text"
+): void {
+  getDb().run(
+    "INSERT INTO room_messages (id, room_id, seq_id, sender_id, sender_name, content, msg_type, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    [msgId, roomId, seqId, senderId, senderName, content, msgType, Date.now()]
+  );
+}
+
+export function getRoomMessagesAfter(
+  roomId: string,
+  afterSeqId: number,
+  limit: number
+): Array<{ id: string; seq_id: number; sender_id: string; sender_name: string; content: string; msg_type: string; timestamp: number }> {
+  return getAll(getDb(), "SELECT id, seq_id, sender_id, sender_name, content, msg_type, timestamp FROM room_messages WHERE room_id = ? AND seq_id > ? ORDER BY seq_id ASC LIMIT ?", [roomId, afterSeqId, limit]) as any;
+}
+
+export function getRoomMessagesBefore(
+  roomId: string,
+  beforeSeqId: number,
+  limit: number
+): Array<{ id: string; seq_id: number; sender_id: string; sender_name: string; content: string; msg_type: string; timestamp: number }> {
+  const rows = getAll(getDb(), "SELECT id, seq_id, sender_id, sender_name, content, msg_type, timestamp FROM room_messages WHERE room_id = ? AND seq_id < ? ORDER BY seq_id DESC LIMIT ?", [roomId, beforeSeqId, limit]) as any[];
+  return rows.reverse();
 }
 
 // Nonce ops

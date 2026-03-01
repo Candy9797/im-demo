@@ -107,7 +107,12 @@ export const MessageList: React.FC = () => {
     };
   }, []);
 
-  /** 撤回（自己或对方）导致高度变小时，做 scrollTop 补偿，避免列表跳动 */
+  /**
+   * 撤回（自己或对方）导致高度变小时，做 scrollTop 补偿，避免列表跳动。
+   * Virtuoso 内部也有处理（ResizeObserver + atBottom 时 scrollTopDelta / lastJumpDueToItemResize），
+   * 但仅在「向上滚动」方向时应用 scrollBy(-jump)（见 dist 中 P(..a === ae) 等条件），
+   * 聊天场景下撤回时未必满足，故此处用真实量到的 oldHeight 做一次补偿更稳妥。
+   */
   useEffect(() => {
     const pending = pendingRecallCompensationRef.current;
     if (!pending) return;
@@ -125,16 +130,30 @@ export const MessageList: React.FC = () => {
       }
       pendingRecallCompensationRef.current = null;
     };
-    requestAnimationFrame(() => requestAnimationFrame(run));
+    // requestAnimationFrame(() => requestAnimationFrame(run));
   }, [messages]);
   const flushReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false); // 是否显示「回到底部」按钮
-  const isAtBottomRef = useRef(true); // 是否在底部，供外部逻辑判断
+  const isAtBottomRef = useRef(true);
+  const messageCountRef = useRef(messages.length); // 当前条数，供 atBottomStateChange 等读取
+  const lastMessageCountAtBottomRef = useRef(messages.length); // 上次在底部时的消息条数，用于判断是否有新消息
+  const [showNewMessageBubble, setShowNewMessageBubble] = useState(false);
+  const [newMessageCount, setNewMessageCount] = useState(0); // 气泡上显示的「新消息」条数
+  messageCountRef.current = messages.length;
+
+  /** 有新消息（当前条数 > 上次在底部时的条数）时显示新消息气泡提示，不依赖 Virtuoso 的 atBottom */
+  useEffect(() => {
+    const lastAtBottom = lastMessageCountAtBottomRef.current;
+    if (messages.length > lastAtBottom) {
+      setNewMessageCount(messages.length - lastAtBottom);
+      setShowNewMessageBubble(true);
+      setShowScrollBtn(true);
+    }
+  }, [messages.length]);
 
   /**
    * 滚动到底部（最后一条消息）。
-   * 作用：用户点击「回到底部」按钮时调用，或外部需要滚底时使用。通过 Virtuoso 的 scrollToIndex 滚到
-   * 最后一项；smooth 为 true 时平滑滚动，为 false 时瞬间跳转。同时把 isAtBottomRef 置为 true、隐藏「回到底部」按钮。
+   * 同时同步「上次在底部时的条数」并隐藏新消息气泡。
    */
   const scrollToBottom = useCallback((smooth = true) => {
     virtuosoRef.current?.scrollToIndex({
@@ -142,16 +161,22 @@ export const MessageList: React.FC = () => {
       behavior: smooth ? 'smooth' : 'auto',
     });
     isAtBottomRef.current = true;
+    lastMessageCountAtBottomRef.current = messages.length;
     setShowScrollBtn(false);
+    setShowNewMessageBubble(false);
   }, [messages.length]);
 
   /**
    * 关键 API 2/2：atBottomStateChange(atBottom)
-   * 用户滚动导致「是否在底部」变化时调用，用于显隐「回到底部」按钮并同步 isAtBottomRef。
+   * 用户滚动导致「是否在底部」变化时调用；在底部时同步 lastMessageCountAtBottomRef 并隐藏新消息气泡。
    */
   const atBottomStateChange = useCallback((atBottom: boolean) => {
     isAtBottomRef.current = atBottom;
     setShowScrollBtn(!atBottom);
+    if (atBottom) {
+      lastMessageCountAtBottomRef.current = messageCountRef.current;
+      setShowNewMessageBubble(false);
+    }
   }, []);
 
   /** 滚动到顶部时加载更多历史消息 */
@@ -328,7 +353,22 @@ export const MessageList: React.FC = () => {
         className="message-list-virtuoso"
       />
 
-      {showScrollBtn && (
+      {showNewMessageBubble && (
+        <button
+          type="button"
+          className="new-message-bubble"
+          onClick={() => scrollToBottom()}
+          aria-label="新消息，点击回到底部"
+        >
+          <span className="new-message-bubble-text">
+            {newMessageCount > 0 ? `${newMessageCount} 条新消息` : '新消息'}
+          </span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+      )}
+      {showScrollBtn && !showNewMessageBubble && (
         <button
           className="scroll-to-bottom-btn"
           onClick={() => scrollToBottom()}

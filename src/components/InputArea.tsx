@@ -103,7 +103,7 @@ export const InputArea: React.FC = () => {
     });
   }, []);
 
-  // ---------- 草稿：防抖写入 IndexedDB ----------
+  // ---------- 草稿：防抖写入 IndexedDB 展示未发送的消息 ----------
   useEffect(() => {
     const t = setTimeout(() => {
       if (textRef.current.trim()) setDraft(DRAFT_ID_CUSTOMER_SERVICE, textRef.current);

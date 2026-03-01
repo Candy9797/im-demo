@@ -1029,6 +1029,34 @@ html, body {
   color: var(--text-primary);
 }
 
+/* 新消息气泡提示：有新消息时显示，点击回到底部 */
+.new-message-bubble {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--radius-lg);
+  background: var(--bubble-user, #f0b90b);
+  color: var(--bubble-user-text, #0b0e11);
+  border: none;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: opacity 0.2s, transform 0.2s;
+}
+.new-message-bubble:hover {
+  opacity: 0.95;
+  transform: translateX(-50%) scale(1.02);
+}
+.new-message-bubble-text {
+  white-space: nowrap;
+}
+
 /* ============ Message Items ============ */
 
 .message-item {
@@ -2871,7 +2899,8 @@ html, body {
   background: var(--bg-primary);
 }
 
-.history-message-list .scroll-to-bottom-btn {
+.history-message-list .scroll-to-bottom-btn,
+.history-message-list .new-message-bubble {
   bottom: 24px;
 }
 

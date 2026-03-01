@@ -163,7 +163,9 @@ export const ChatSessionInput: React.FC = () => {
     });
   }, [draftId]);
 
-  // ---------- 草稿：防抖写入 IndexedDB ----------
+  // ---------- 草稿：防抖写入 IndexedDB 总结：clearDraft 在两处被调用——
+// 1）输入框内容被清空时的防抖 effect 里；
+// 2）发送消息成功后的 handleSend 里，用于清掉该会话/客服的草稿。----------
   useEffect(() => {
     if (!draftId) return;
     const t = setTimeout(() => {

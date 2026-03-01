@@ -7,7 +7,7 @@
  * - 虚拟化：Virtuoso 仅渲染可见区，OVERSCAN 为缓冲区条数
  */
 
-import React, { useRef, useState, useCallback, useMemo } from 'react';
+import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { MessageItem } from '@/components/MessageItem';
 import type { Message } from '@/sdk';
@@ -27,17 +27,38 @@ export const HistoryMessageList: React.FC<HistoryMessageListProps> = ({
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const messageCountRef = useRef(messages.length);
+  const lastMessageCountAtBottomRef = useRef(messages.length);
+  const [showNewMessageBubble, setShowNewMessageBubble] = useState(false);
+  const [newMessageCount, setNewMessageCount] = useState(0);
+  messageCountRef.current = messages.length;
+
+  /** 有新消息时显示新消息气泡提示 */
+  useEffect(() => {
+    const lastAtBottom = lastMessageCountAtBottomRef.current;
+    if (messages.length > lastAtBottom) {
+      setNewMessageCount(messages.length - lastAtBottom);
+      setShowNewMessageBubble(true);
+      setShowScrollBtn(true);
+    }
+  }, [messages.length]);
 
   const scrollToBottom = useCallback((smooth = true) => {
     virtuosoRef.current?.scrollToIndex({
       index: messages.length - 1,
       behavior: smooth ? 'smooth' : 'auto',
     });
+    lastMessageCountAtBottomRef.current = messages.length;
     setShowScrollBtn(false);
+    setShowNewMessageBubble(false);
   }, [messages.length]);
 
   const atBottomStateChange = useCallback((atBottom: boolean) => {
     setShowScrollBtn(!atBottom);
+    if (atBottom) {
+      lastMessageCountAtBottomRef.current = messageCountRef.current;
+      setShowNewMessageBubble(false);
+    }
   }, []);
 
   const showAvatarMap = useMemo(() => {
@@ -105,7 +126,22 @@ export const HistoryMessageList: React.FC<HistoryMessageListProps> = ({
         components={components}
         className="history-message-virtuoso"
       />
-      {showScrollBtn && (
+      {showNewMessageBubble && (
+        <button
+          type="button"
+          className="new-message-bubble"
+          onClick={() => scrollToBottom()}
+          aria-label="新消息，点击回到底部"
+        >
+          <span className="new-message-bubble-text">
+            {newMessageCount > 0 ? `${newMessageCount} 条新消息` : '新消息'}
+          </span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+      )}
+      {showScrollBtn && !showNewMessageBubble && (
         <button
           className="scroll-to-bottom-btn"
           onClick={() => scrollToBottom()}
