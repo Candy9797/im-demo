@@ -3,12 +3,35 @@
 /**
  * 文件预览：图片（缩略图 + 点击放大）、PDF（文件名和大小）
  *
- * 滚动防闪：图片容器预留宽高比、加载前占位、decoding="async"，减少虚拟列表滚动时白屏/闪动。
+ * 虚拟列表滚动防闪：
+ * 1. 图片容器预留宽高比（aspectRatio 4/3）、minHeight、decoding="async"，减少布局抖动。
+ * 2. 已加载 URL 缓存：虚拟列表会回收/复用 DOM，项重新挂载时 imageLoaded 会重置为 false 导致再次「占位→淡入」闪动。
+ *    用模块级缓存记录已加载过的图片 URL，挂载时若 URL 在缓存中则直接视为已加载（opacity 1、不显示占位），
+ *    避免滚动回来时重新闪一次。缓存有上限（约 200），超出时淘汰最早加入的 URL。
  */
 
 import React, { useState } from 'react';
 import { type Message, MessageType } from '@/sdk';
 import { formatFileSize } from '@/utils/helpers';
+
+/** 已加载图片 URL 缓存，用于虚拟列表项复用时避免图片再次「占位→淡入」闪动；上限约 200，FIFO 淘汰 */
+const LOADED_IMAGE_CAP = 200;
+const loadedImageUrls = new Set<string>();
+const loadedImageUrlOrder: string[] = [];
+
+function addLoadedImageUrl(url: string): void {
+  if (!url || loadedImageUrls.has(url)) return;
+  if (loadedImageUrlOrder.length >= LOADED_IMAGE_CAP) {
+    const old = loadedImageUrlOrder.shift();
+    if (old) loadedImageUrls.delete(old);
+  }
+  loadedImageUrls.add(url);
+  loadedImageUrlOrder.push(url);
+}
+
+function hasLoadedImageUrl(url: string): boolean {
+  return !!url && loadedImageUrls.has(url);
+}
 
 interface FilePreviewProps {
   message: Message;
@@ -16,7 +39,8 @@ interface FilePreviewProps {
 
 export const FilePreview: React.FC<FilePreviewProps> = ({ message }) => {
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
-  const [imageLoaded, setImageLoaded] = useState(false);
+  const imageUrl = message.type === MessageType.IMAGE ? message.content : '';
+  const [imageLoaded, setImageLoaded] = useState(() => hasLoadedImageUrl(imageUrl));
 
   if (message.type === MessageType.IMAGE) {
     return (
@@ -38,7 +62,10 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ message }) => {
             alt="Shared image"
             loading="lazy"
             decoding="async"
-            onLoad={() => setImageLoaded(true)}
+            onLoad={() => {
+              addLoadedImageUrl(message.content);
+              setImageLoaded(true);
+            }}
             onError={(e) => {
               (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect fill="%231e2329" width="120" height="80"/><text x="60" y="45" fill="%23848e9c" text-anchor="middle" font-size="12">Image</text></svg>';
               setImageLoaded(true);
@@ -50,7 +77,7 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ message }) => {
               height: '100%',
               objectFit: 'contain',
               opacity: imageLoaded ? 1 : 0,
-              transition: 'opacity 0.15s ease-out',
+              transition: imageLoaded ? 'opacity 0.15s ease-out' : 'none',
             }}
           />
         </div>

@@ -50,6 +50,30 @@ Zustand persist 的 IndexedDB 存储引擎，用于将 chatStore 部分状态持
 
 ---
 
+## IndexedDB 里的消息状态变了怎么办？
+
+### 内存 → IndexedDB（状态变更如何落盘）
+
+- **以内存为准**：chatStore 是单一数据源，每次消息状态变更（如 SENDING → SENT、FAILED，或 ACK、已读、撤回等）都会触发 persist 的 `setItem`。
+- **防抖写入**：`setItem` 只更新内存中的 pending，80ms 内无新调用时才执行 `flushWrite()` 写入 IndexedDB，因此 **IndexedDB 会在短暂延迟后与内存保持一致**，无需额外处理。
+
+### IndexedDB → 内存（恢复时状态过期怎么办）
+
+- **场景**：刷新或重连后从 IndexedDB 恢复（rehydration 或 `getPersistedChatState`），读到的快照可能是关闭页面前或断网前的状态，其中部分消息的 `status` 仍是 `sending`（当时尚未收到 ACK）。若直接展示，界面会一直显示「发送中」。
+- **处理**：在「从 IndexedDB 读出并交给业务使用」前，对消息列表做**规范化**：把所有 `status === 'sending'` 的改为 `'failed'`，表示按「未确认结果」处理，避免悬空态。
+- **实现位置**：
+  - **getPersistedChatState()**：返回前对 `state.messages` 调用 `normalizePersistedMessages()`，供 IMClient 直接读时已是规范后的列表。
+  - **chatStore persist merge**：rehydration 时若采用 IndexedDB 的列表（`perMax > curMax`），对 `per` 先做 `normalizePersistedMessages` 再写回 `messages`，保证 rehydration 后的 store 里没有遗留的 `sending`。
+
+### 小结
+
+| 方向 | 谁主导 | 说明 |
+|------|--------|------|
+| 内存 → IndexedDB | 内存 | 每次 store 变更触发 setItem（防抖 80ms），最终写入 IndexedDB，状态变更自动落盘。 |
+| IndexedDB → 内存 | 读时规范化 | getPersistedChatState 与 merge 在采用 IDB 数据时，将 `sending` 规范为 `failed`，避免恢复后仍显示「发送中」。 |
+
+---
+
 ## 调用关系
 
 - **chatStore**：persist 中间件使用 `createJSONStorage(() => chatPersistStorage)`，state 变化时调用 `setItem`，初始化时调用 `getItem`。
@@ -62,7 +86,8 @@ Zustand persist 的 IndexedDB 存储引擎，用于将 chatStore 部分状态持
 | 名称 | 说明 |
 |------|------|
 | **chatPersistStorage** | 实现 StateStorage：`getItem(name)`、`setItem(name, value)`、`removeItem(name)`。setItem 带 80ms 防抖。 |
-| **getPersistedChatState()** | 从 IndexedDB 读取并解析 chat 持久化状态。若有 pending 未写入会先 flush，保证读到最新。返回 `{ messages, conversationId }` 或 null。 |
+| **getPersistedChatState()** | 从 IndexedDB 读取并解析 chat 持久化状态；若有 pending 会先 flush。返回前对 messages 做 normalizePersistedMessages（sending → failed），避免恢复后仍显示「发送中」。 |
+| **normalizePersistedMessages(messages)** | 将列表中 `status === 'sending'` 的消息改为 `'failed'`，用于从 IndexedDB 恢复时规范化状态。 |
 | **PersistedChatState** | 类型：`{ messages: Array<...>, conversationId: string }`，与 partialize 一致。 |
 | **CHAT_PERSIST_NAME** | 持久化 key，与 chatStore persist 的 name 一致（`"im-demo-chat"`）。 |
 

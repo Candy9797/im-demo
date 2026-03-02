@@ -1,78 +1,97 @@
 /**
  * MessageQueue - 高频消息队列（批处理、去重、重试）
  *
- * 场景：群聊、行情推送等每秒数十条消息
- * 能力：入站批处理减少 setState；出站批处理降低帧数；5s 窗口去重；发送失败/ACK 超时自动重试
- * 模式：生产者-消费者，flushInterval 定时 flush
+ * 上层 IMClient 将待发消息 enqueueOutgoing、将收到的消息 enqueueIncoming；本类按 flushInterval 定时 flush，
+ * 先 flushIncoming（批交给 onFlushIncoming 派发到 UI），再 flushOutgoing（批交给 onFlushOutgoing 发到 WS）。
  *
- * --- 何时会重发（同一条消息可能被再次发送）---
- * 1. 发送失败：flushOutgoing 里 onFlushOutgoing（如 ws.send）抛错时，消息 unshift 回 outgoing，
- *    下次 flush 会自动再发；最多重试 retryAttempts 次，超过则 markSendFailed。
- * 2. ACK 超时：消息发成功后进入 pendingAck 并设 ackTimeoutMs 定时器；超时未收到服务端 message_ack，
- *    则 handleAckTimeout 把该消息移回 outgoing 队头，下次 flush 自动再发；同样受 retryAttempts 限制。
- * 3. 断线回滚：DISCONNECTED 时 IMClient 调 rollbackPendingAck，把 pendingAck 里未确认消息全部移回 outgoing，
- *    重连后 resume 恢复定时 flush，这些消息会在后续 flush 中自动重发（仍受 retryAttempts 限制）。
+ * --- 一、场景与能力 ---
+ * 场景：群聊、行情推送等每秒数十条消息。
+ * 能力：入站批处理减少 setState 次数；出站批处理降低 WebSocket 帧数；deduplicationWindow 内按 id 去重避免重复展示；
+ *       发送失败或 ACK 超时自动重试（受 retryAttempts 限制），超限则 markSendFailed 并回调 onMessageSendFailed。
+ * 模式：生产者-消费者，start() 后按 flushInterval 定时 flush；pause/resume 用于断线时暂停、重连后恢复。
  *
- * 待确认队列（Pending-Ack）：send 后消息移入 pendingAck，ACK 到达才移除；
- * 断线时 rollbackPendingAck 将未确认消息回滚到 outgoing，重连后重发。
- * 入站去重：seenIds 在时间窗口内去重，避免重复展示。先入后出：flush 时先处理入站再出站。
+ * --- 二、队列与状态 ---
+ * outgoing：待发队列，flush 时取一批交给 onFlushOutgoing 发送；发送成功后移入 pendingAck。
+ * pendingAck：已发出但未收到服务端 message_ack 的消息；收到 onAck(clientMsgId) 时移除；断线时 rollbackPendingAck 回滚到 outgoing。
+ * incoming：待处理入站队列，flush 时取一批交给 onFlushIncoming；enqueueIncoming 时用 seenIds 做窗口内去重。
+ * seenIds：id -> 时间戳，用于入站去重；cleanupDedup 定期清理超出 deduplicationWindow 的条目。
+ *
+ * --- 三、何时会重发（同一条消息可能被再次发送）---
+ * 1. 发送失败：flushOutgoing 里 onFlushOutgoing（如 ws.send）抛错时，本批消息 unshift 回 outgoing，下次 flush 再发；attempts 超 retryAttempts 则 markSendFailed。
+ * 2. ACK 超时：消息发成功后进入 pendingAck 并设 ackTimeoutMs 定时器；超时未收到 message_ack 则 handleAckTimeout 将该条移回 outgoing 队头，下次 flush 再发；同样受 retryAttempts 限制。
+ * 3. 断线回滚：DISCONNECTED 时 IMClient 调 rollbackPendingAck，将 pendingAck 中未确认消息全部移回 outgoing，重连后 resume，后续 flush 中自动重发（仍受 retryAttempts 限制）。
+ *
+ * --- 四、执行顺序 ---
+ * flush() 每次先 flushIncoming() 再 flushOutgoing()，保证先处理收再处理发；start() 注册 onFlushOutgoing、onFlushIncoming、onMessageSendFailed。
+ *
+ * --- 五、相关文件 ---
+ * 使用方：IMClient 创建 MessageQueue、start 时传入发送/入站/失败回调，连接状态变化时 pause/resume/rollbackPendingAck；类型见 types.ts Message、MessageStatus。
  */
 
 import { type Message, MessageStatus } from "./types";
 
-/** 队列配置 */
+/** 队列配置：容量、批大小、flush 周期、重试与去重参数 */
 interface QueueConfig {
-  maxSize: number; // 队列最大长度，超限丢弃最旧
-  batchSize: number; // 每批处理条数
-  flushInterval: number; // 批量 flush 间隔（毫秒）
-  retryAttempts: number; // 发送失败最大重试次数
-  retryDelay: number; // 重试间隔基数（指数退避）
-  deduplicationWindow: number; // 去重时间窗口（毫秒）
-  ackTimeoutMs: number; // ACK 超时（毫秒），超时未收到 ACK 则重发
+  maxSize: number;           // 待发队列最大长度，超限时丢弃最旧的一条非 sending 消息（若全是 sending 则拒绝入队）
+  batchSize: number;         // 每批从 outgoing/incoming 取出的条数
+  flushInterval: number;     // 定时 flush 间隔（毫秒），如 100 表示约每秒 10 次 flush
+  retryAttempts: number;     // 发送失败或 ACK 超时后最多重试次数，超过则 markSendFailed
+  retryDelay: number;        // 重试间隔基数（当前实现未用于退避，仅保留配置）
+  deduplicationWindow: number; // 入站去重时间窗口（毫秒），窗口内相同 id 只保留第一条
+  ackTimeoutMs: number;      // 消息发出后等待服务端 message_ack 的超时（毫秒），超时则 handleAckTimeout 回队重发或标记失败
 }
 
-/** 默认配置 */
+/** 默认配置（可被构造函数传入的 config 覆盖） */
 const DEFAULT_CONFIG: QueueConfig = {
   maxSize: 1000,
   batchSize: 20,
-  flushInterval: 100, // 100ms batch window — ~10 flushes/second
+  flushInterval: 100,
   retryAttempts: 3,
   retryDelay: 1000,
   deduplicationWindow: 5000,
-  // 消息发出去后如果 10 秒内没收到服务端的 message_ack，就会触发 handleAckTimeout，按重试次数回队重发或标记失败
-  ackTimeoutMs: 10000, // 10s
+  ackTimeoutMs: 10000,
 };
 
-/** 待发消息（含重试次数与入队时间） */
+/** 待发消息包装：携带原始 Message、已尝试次数（用于重试上限）、入队时间戳 */
 interface PendingMessage {
   message: Message;
-  attempts: number; // 已尝试次数
-  addedAt: number; // 入队时间戳
+  attempts: number;
+  addedAt: number;
 }
 
 export class MessageQueue {
   private config: QueueConfig;
-  private outgoing: PendingMessage[] = []; // 待发队列
-  /** 已发送但未收到 ACK 的消息，断线时回滚到 outgoing */
+  /** 待发队列：enqueueOutgoing 入队，flushOutgoing 按 batchSize 取出交给 onFlushOutgoing */
+  private outgoing: PendingMessage[] = [];
+  /** 已发送但未收到 ACK 的消息（key 为 message.id）；收到 onAck 移除，断线时 rollbackPendingAck 回滚到 outgoing */
   private pendingAck: Map<string, PendingMessage> = new Map();
-  /** ACK 超时定时器：clientMsgId -> timer */
+  /** 每条 pendingAck 消息对应一个 ACK 超时定时器，超时则 handleAckTimeout */
   private ackTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
-  private incoming: Message[] = []; // 待处理入站队列
-  private seenIds: Map<string, number> = new Map(); // 去重缓存：id -> 时间戳
+  /** 待处理入站队列：enqueueIncoming 入队（带去重），flushIncoming 按 batchSize 取出交给 onFlushIncoming */
+  private incoming: Message[] = [];
+  /** 入站去重缓存：message.id -> 最近一次入队时间戳，cleanupDedup 清理超窗条目 */
+  private seenIds: Map<string, number> = new Map();
   private flushTimer: ReturnType<typeof setInterval> | null = null;
-  private onFlushOutgoing: ((messages: Message[]) => Promise<void>) | null =
-    null; // 实际发送到 ws
-  private onFlushIncoming: ((messages: Message[]) => void) | null = null; // 实际派发到 UI
-  private onMessageSendFailed: ((message: Message) => void) | null = null; // 重试耗尽回调
-  private _isPaused = false; // 断线时暂停，重连后恢复
+  /** 出站批发送回调（如通过 WebSocketManager 发帧），start() 时注册 */
+  private onFlushOutgoing: ((messages: Message[]) => Promise<void>) | null = null;
+  /** 入站批处理回调（如写 store、派发 MESSAGE_RECEIVED），start() 时注册 */
+  private onFlushIncoming: ((messages: Message[]) => void) | null = null;
+  /** 重试耗尽时回调（如派发 MESSAGE_SEND_FAILED），start() 时可选注册 */
+  private onMessageSendFailed: ((message: Message) => void) | null = null;
+  /** 为 true 时 flush 不执行出站/入站，用于断线期间暂停，重连后 resume 恢复 */
+  private _isPaused = false;
 
   constructor(config: Partial<QueueConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
+  // ---------- 启动 / 停止 / 暂停 ----------
   /**
-   * 启动队列：定时 flush，并注册出站/入站/失败回调
-   * @param onMessageSendFailed 可选，重试耗尽时回调（用于 MESSAGE_SEND_FAILED）
+   * 启动队列：注册出站/入站/失败回调，并启动按 flushInterval 执行的 flush 定时器。
+   * 每次 flush 先 flushIncoming 再 flushOutgoing；若 _isPaused 为 true 则本次不执行。
+   * @param onFlushOutgoing 每批待发消息发送到 WS，返回 Promise，抛错则本批回队重试
+   * @param onFlushIncoming 每批入站消息交给 UI/Store
+   * @param onMessageSendFailed 可选，某条消息重试次数用尽时调用（用于派发 MESSAGE_SEND_FAILED）
    */
   start(
     onFlushOutgoing: (messages: Message[]) => Promise<void>,
@@ -91,7 +110,7 @@ export class MessageQueue {
   }
 
   /**
-   * 立即 flush 出站队列（用于突发模式压测，不等定时器）
+   * 立即执行一次出站 flush（不等 flushInterval 定时器）。用于需要尽快发送的场景（如压测）；若已 pause 或 outgoing 为空则无操作。
    */
   async forceFlushOutgoing(): Promise<void> {
     if (!this._isPaused && this.outgoing.length > 0) {
@@ -100,7 +119,7 @@ export class MessageQueue {
   }
 
   /**
-   * 停止队列：清除 flush 定时器与 ACK 超时定时器
+   * 停止队列：清除 flush 定时器与所有 ACK 超时定时器；不再 flush，但队列数据不清空。
    */
   stop(): void {
     if (this.flushTimer) {
@@ -114,25 +133,26 @@ export class MessageQueue {
   }
 
   /**
-   * 暂停队列处理（如断线重连期间）
+   * 暂停队列：将 _isPaused 置 true，后续定时 flush 不再执行，直到 resume()。断线时由 IMClient 调用。
    */
   pause(): void {
     this._isPaused = true;
   }
 
   /**
-   * 恢复队列处理（重连成功后）
+   * 恢复队列：将 _isPaused 置 false，定时 flush 继续执行。重连成功后由 IMClient 调用。
    */
   resume(): void {
     this._isPaused = false;
   }
 
+  // ---------- 入队 ----------
   /**
-   * 入队待发消息，队列满时丢弃最旧的非 sending 消息
+   * 将待发消息入队。若队列已达 maxSize，则尝试丢弃最旧的一条 status 非 SENDING 的消息以腾出空间；
+   * 若全部为 SENDING（理论上少见）则拒绝入队并返回 false。
    */
   enqueueOutgoing(message: Message): boolean {
     if (this.outgoing.length >= this.config.maxSize) {
-      // Drop oldest non-sending message
       const dropIndex = this.outgoing.findIndex(
         (p) => p.message.status !== MessageStatus.SENDING,
       );
@@ -153,47 +173,39 @@ export class MessageQueue {
   }
 
   /**
-   * 入队入站消息，带去重（seenIds 窗口内重复则丢弃）
+   * 将入站消息入队。若 message.id 已在 seenIds 中（ deduplicationWindow 内见过）则视为重复，丢弃并返回 false；
+   * 否则写入 seenIds、push 到 incoming，并调用 cleanupDedup 清理超窗的 seenIds 条目。
    */
   enqueueIncoming(message: Message): boolean {
-    // Deduplication check
     if (this.isDuplicate(message.id)) {
       return false;
     }
-
     this.seenIds.set(message.id, Date.now());
     this.incoming.push(message);
-
-    // Cleanup old dedup entries
     this.cleanupDedup();
     return true;
   }
 
-  /**
-   * 批量处理：先 flush 入站，再 flush 出站
-   */
+  // ---------- 批量 flush（先入站再出站）----------
+  /** 每次定时触发：先处理入站（交给 onFlushIncoming），再处理出站（交给 onFlushOutgoing） */
   private async flush(): Promise<void> {
     this.flushIncoming();
     await this.flushOutgoing();
   }
 
   /**
-   * 将入站队列中的一批消息交给 onFlushIncoming 处理
+   * 从 incoming 取出最多 batchSize 条，一次性交给 onFlushIncoming；无回调或队列空则直接 return。
    */
   private flushIncoming(): void {
     if (this.incoming.length === 0 || !this.onFlushIncoming) return;
-
     const batch = this.incoming.splice(0, this.config.batchSize);
     this.onFlushIncoming(batch);
   }
 
   /**
-   * Flush outgoing messages to the send handler.
-   * 发送成功后移入 pendingAck，等 ACK 到达后由 onAck 移除；断线时 rollbackPendingAck 回滚重发。
-   *
-   * 会触发重发的两种情况（均为自动，无需业务调用）：
-   * - onFlushOutgoing 抛错：本批消息 unshift 回 outgoing，下次 flush 再发（attempts 超限则 markSendFailed）。
-   * - 本批发成功后：每条在 pendingAck 中挂 ackTimeoutMs 定时器，超时未 onAck 则 handleAckTimeout 回队重发。
+   * 出站 flush：从 outgoing 取出最多 batchSize 条，attempts++ 后交给 onFlushOutgoing 发送。
+   * 成功：每条移入 pendingAck 并设 ackTimeoutMs 定时器，超时未收到 onAck 则 handleAckTimeout 回队重发或 markSendFailed。
+   * 失败（onFlushOutgoing 抛错）：本批每条若 attempts 未超 retryAttempts 则 unshift 回 outgoing，否则 markSendFailed。
    */
   private async flushOutgoing(): Promise<void> {
     if (this.outgoing.length === 0 || !this.onFlushOutgoing) return;
@@ -206,7 +218,6 @@ export class MessageQueue {
 
     try {
       await this.onFlushOutgoing(messages);
-      // 发送成功（已写入 ws 缓冲区），移入待确认队列，启动 ACK 超时定时器
       for (const pending of batch) {
         const clientMsgId = pending.message.id;
         this.pendingAck.set(clientMsgId, pending);
@@ -217,7 +228,6 @@ export class MessageQueue {
         this.ackTimers.set(clientMsgId, timer);
       }
     } catch {
-      // ws.send 抛错（如已断开），回队或标记失败
       for (const pending of batch) {
         if (pending.attempts < this.config.retryAttempts) {
           this.outgoing.unshift(pending);
@@ -228,7 +238,11 @@ export class MessageQueue {
     }
   }
 
-  /** 收到 ACK，从待确认队列移除，清除超时定时器 */
+  // ---------- ACK 确认与超时、断线回滚 ----------
+  /**
+   * 收到服务端对某条消息的 message_ack 时调用（IMClient 在收到 message_ack 帧时按 clientMsgId 调用）。
+   * 从 pendingAck 与 ackTimers 中移除该条，不再等待 ACK 超时。
+   */
   onAck(clientMsgId: string): void {
     const timer = this.ackTimers.get(clientMsgId);
     if (timer) {
@@ -239,8 +253,8 @@ export class MessageQueue {
   }
 
   /**
-   * ACK 超时：发成功后 ackTimeoutMs 内未收到服务端 message_ack，视为可能丢包，回队重发或标记失败。
-   * attempts < retryAttempts 则 unshift 回 outgoing（下次 flush 自动再发），否则 markSendFailed。
+   * ACK 超时回调（由 ackTimeoutMs 定时器触发）：该条消息发出后未在时限内收到 onAck，视为可能丢包。
+   * 从 pendingAck 移除后，若 attempts < retryAttempts 则 unshift 回 outgoing 队头（下次 flush 再发），否则 markSendFailed。
    */
   private handleAckTimeout(clientMsgId: string): void {
     this.ackTimers.delete(clientMsgId);
@@ -255,9 +269,8 @@ export class MessageQueue {
   }
 
   /**
-   * 断线时调用（由 IMClient 在 DISCONNECTED 时调用）：将 pendingAck 中「已发出但未收到 ACK」的消息
-   * 全部移回 outgoing 队头，并清除 ACK 超时定时器。重连后 resume 恢复 flush，这些消息会在后续
-   * flush 中自动重发（仍受 retryAttempts 限制，超限则 markSendFailed）。
+   * 断线回滚（由 IMClient 在 DISCONNECTED 时调用）：将 pendingAck 中所有未确认消息移回 outgoing 队头，
+   * 并清除对应的 ACK 超时定时器。每条若 attempts 已超 retryAttempts 则 markSendFailed，否则在重连后 resume 的后续 flush 中自动重发。
    */
   rollbackPendingAck(): void {
     for (const [clientMsgId, pending] of this.pendingAck) {
@@ -275,7 +288,7 @@ export class MessageQueue {
     this.pendingAck.clear();
   }
 
-  /** 标记消息发送失败，并回调 onMessageSendFailed */
+  /** 将消息状态置为 FAILED 并调用 onMessageSendFailed（若已注册），用于重试次数用尽或回滚时超限的情况 */
   private markSendFailed(pending: PendingMessage): void {
     console.error(
       `[MessageQueue] Message ${pending.message.id} failed after ${this.config.retryAttempts} attempts`,
@@ -284,16 +297,13 @@ export class MessageQueue {
     this.onMessageSendFailed?.(pending.message);
   }
 
-  /**
-   * 判断消息 ID 是否在去重窗口内已见过
-   */
+  // ---------- 入站去重 ----------
+  /** 判断入站消息 id 是否已在 seenIds 中（在 deduplicationWindow 内出现过则视为重复） */
   private isDuplicate(id: string): boolean {
     return this.seenIds.has(id);
   }
 
-  /**
-   * 清理超出 deduplicationWindow 的 seenIds 条目
-   */
+  /** 删除 seenIds 中时间戳早于 (now - deduplicationWindow) 的条目，避免缓存无限增长 */
   private cleanupDedup(): void {
     const cutoff = Date.now() - this.config.deduplicationWindow;
     for (const [id, ts] of this.seenIds) {
@@ -303,8 +313,9 @@ export class MessageQueue {
     }
   }
 
+  // ---------- 统计与对外查询 ----------
   /**
-   * 获取队列统计（用于调试/监控）
+   * 返回当前队列统计：outgoing 长度、pendingAck 数量、incoming 长度、seenIds 大小、是否暂停。用于调试或监控面板。
    */
   getStats() {
     return {
@@ -316,7 +327,7 @@ export class MessageQueue {
     };
   }
 
-  /** 当前待发消息数量 */
+  /** 当前待发队列（outgoing）中的消息条数 */
   get pendingCount(): number {
     return this.outgoing.length;
   }

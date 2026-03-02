@@ -54,6 +54,7 @@ import {
   chatPersistStorage,
   CHAT_PERSIST_NAME,
   getPersistedChatState,
+  normalizePersistedMessages,
 } from "@/lib/chatPersistStorage";
 
 /** 撤回失败时用于回滚乐观更新（recall_expired） */
@@ -972,10 +973,15 @@ export const useChatStore = create<ChatState>()(
       const per = (persisted as { messages?: Message[] })?.messages ?? [];
       const curMax = cur.reduce((m, x) => Math.max(m, x.seqId ?? 0), 0);
       const perMax = per.reduce((m, x) => Math.max(m, x.seqId ?? 0), 0);
+      // 采用 IndexedDB 列表时规范化：sending → failed，避免恢复后仍显示「发送中」（见 chatPersistStorage 文档）
+      const messages: Message[] =
+        curMax >= perMax
+          ? cur
+          : (normalizePersistedMessages(per as unknown as Array<Record<string, unknown>>) as unknown as Message[]);
       return {
         ...(state as ChatState),
         ...(persisted as Record<string, unknown>),
-        messages: curMax >= perMax ? cur : per,
+        messages,
       };
     },
   }

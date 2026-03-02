@@ -170,6 +170,15 @@ export interface PersistedChatState {
   conversationId: string;
 }
 
+/** 从 IndexedDB 读出的消息里，把 status 为 'sending' 的改为 'failed'，避免刷新/重连后仍显示「发送中」 */
+export function normalizePersistedMessages(
+  messages: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  return messages.map((m) =>
+    m.status === "sending" ? { ...m, status: "failed" } : m,
+  );
+}
+
 /**
  * 读取已持久化的 chat 状态
  *
@@ -178,12 +187,16 @@ export interface PersistedChatState {
  * - Zustand persist 的 rehydration 可能尚未完成，store 里 messages 还是空的
  * - 此时可直接从 IndexedDB 读取，展示离线消息，避免空白
  *
+ * ## 消息状态（IndexedDB 里的消息状态变了怎么办）
+ * - 内存 → IndexedDB：store 每次变更都会触发 persist 的 setItem（防抖 80ms），最终写入 IndexedDB，故状态变更（如 SENDING→SENT/FAILED）会自动落盘。
+ * - IndexedDB → 内存：刷新或重连后从 IndexedDB 恢复时，可能拿到上次未写完或关闭页面前的快照，其中部分消息仍是 SENDING。若不处理，界面会一直显示「发送中」。本函数在返回前对 messages 做规范化：将 status === 'sending' 的改为 'failed'，表示按「未确认」处理，避免悬空态。rehydration 时的 merge 也应对来自 IndexedDB 的列表做同样规范化（见 chatStore merge）。
+ *
  * ## 实现
  * - 若有 pending 未写入，先 flush，确保读到最新
  * - 解析 JSON，校验 messages 为数组、conversationId 为字符串
+ * - 返回前对 messages 调用 normalizePersistedMessages
  */
 export async function getPersistedChatState(): Promise<PersistedChatState | null> {
-  // 先 flush 未写入的缓冲，保证读到最新
   if (pendingValue !== null && flushTimer) {
     clearTimeout(flushTimer);
     flushTimer = null;
@@ -199,7 +212,10 @@ export async function getPersistedChatState(): Promise<PersistedChatState | null
       Array.isArray(state.messages) &&
       typeof state.conversationId === "string"
     ) {
-      return state;
+      return {
+        ...state,
+        messages: normalizePersistedMessages(state.messages),
+      };
     }
   } catch {
     // ignore parse error
