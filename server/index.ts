@@ -113,8 +113,35 @@ app.get("/api/rate-limit-config", (_req, res) => {
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 const server = createServer(app);
-const wss = new WebSocketServer({ server, path: "/ws" });
-const wssRoom = new WebSocketServer({ server, path: "/ws-room" });
+
+// 使用 noServer + 手动 upgrade，避免被其它中间件或 404 返回 HTTP  body 导致客户端报 "Invalid frame header"
+const wss = new WebSocketServer({
+  noServer: true,
+  handleProtocols: (protocols: Set<string> | string) => {
+    const set = typeof protocols === "string" ? new Set(protocols.split(",").map((p: string) => p.trim())) : protocols;
+    return set.has("im-auth") ? "im-auth" : false;
+  },
+});
+const wssRoom = new WebSocketServer({
+  noServer: true,
+});
+
+server.on("upgrade", (request, socket, head) => {
+  const pathname = request.url?.split("?")[0] ?? "";
+  if (pathname === "/ws") {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit("connection", ws, request);
+    });
+    return;
+  }
+  if (pathname === "/ws-room") {
+    wssRoom.handleUpgrade(request, socket, head, (ws) => {
+      wssRoom.emit("connection", ws, request);
+    });
+    return;
+  }
+  socket.destroy();
+});
 
 /** 从 Sec-WebSocket-Protocol 头解析 JWT（子协议为 im-auth,<token>），避免 URL 泄露；无则回退到 URL query */
 function getTokenFromRequest(req: IncomingMessage): string | null {
